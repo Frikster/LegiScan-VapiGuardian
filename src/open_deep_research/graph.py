@@ -1,22 +1,47 @@
 from typing import Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-
 from langgraph.constants import Send
-from langgraph.graph import START, END, StateGraph
-from langgraph.types import interrupt, Command
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 
-from open_deep_research.state import ReportStateInput, ReportStateOutput, Sections, ReportState, SectionState, SectionOutputState, Queries, Feedback
-from open_deep_research.prompts import report_planner_query_writer_instructions, report_planner_instructions, query_writer_instructions, section_writer_instructions, final_section_writer_instructions, section_grader_instructions
 from open_deep_research.configuration import Configuration
-from open_deep_research.utils import tavily_search_async, exa_search, arxiv_search_async, pubmed_search_async, deduplicate_and_format_sources, format_sections, perplexity_search, get_config_value, get_search_params
+from open_deep_research.prompts import (
+    final_section_writer_instructions,
+    query_writer_instructions,
+    report_planner_instructions,
+    report_planner_query_writer_instructions,
+    section_grader_instructions,
+    section_writer_instructions,
+)
+from open_deep_research.state import (
+    Feedback,
+    Queries,
+    ReportState,
+    ReportStateInput,
+    ReportStateOutput,
+    SectionOutputState,
+    Sections,
+    SectionState,
+)
+from open_deep_research.utils import (
+    arxiv_search_async,
+    deduplicate_and_format_sources,
+    exa_search,
+    format_sections,
+    get_config_value,
+    get_search_params,
+    perplexity_search,
+    pubmed_search_async,
+    tavily_search_async,
+)
+
 
 # Nodes
 async def generate_report_plan(state: ReportState, config: RunnableConfig):
-    """ Generate the report plan """
-
+    """Generate the report plan."""
     # Inputs
     topic = state["topic"]
     feedback = state.get("feedback_on_report_plan", None)
@@ -109,8 +134,7 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     return {"sections": sections}
 
 def human_feedback(state: ReportState, config: RunnableConfig) -> Command[Literal["generate_report_plan","build_section_with_web_research"]]:
-    """ Get feedback on the report plan """
-
+    """Get feedback on the report plan."""
     # Get sections
     topic = state["topic"]
     sections = state['sections']
@@ -146,8 +170,7 @@ def human_feedback(state: ReportState, config: RunnableConfig) -> Command[Litera
         raise TypeError(f"Interrupt value of type {type(feedback)} is not supported.")
     
 def generate_queries(state: SectionState, config: RunnableConfig):
-    """ Generate search queries for a report section """
-
+    """Generate search queries for a report section."""
     # Get state 
     topic = state["topic"]
     section = state["section"]
@@ -174,7 +197,7 @@ def generate_queries(state: SectionState, config: RunnableConfig):
     return {"search_queries": queries.queries}
 
 async def search_web(state: SectionState, config: RunnableConfig):
-    """ Search the web for each query, then return a list of raw sources and a formatted string of sources."""
+    """Search the web for each query, then return a list of raw sources and a formatted string of sources."""
     # Get state
     search_queries = state["search_queries"]
 
@@ -209,8 +232,7 @@ async def search_web(state: SectionState, config: RunnableConfig):
     return {"source_str": source_str, "search_iterations": state["search_iterations"] + 1}
 
 def write_section(state: SectionState, config: RunnableConfig) -> Command[Literal[END, "search_web"]]:
-    """ Write a section of the report """
-
+    """Write a section of the report."""
     # Get state 
     topic = state["topic"]
     section = state["section"]
@@ -287,8 +309,7 @@ def write_section(state: SectionState, config: RunnableConfig) -> Command[Litera
         )
     
 def write_final_sections(state: SectionState, config: RunnableConfig):
-    """ Write final sections of the report, which do not require web search and use the completed sections as context """
-
+    """Write final sections of the report, which do not require web search and use the completed sections as context."""
     # Get configuration
     configurable = Configuration.from_runnable_config(config)
 
@@ -314,8 +335,7 @@ def write_final_sections(state: SectionState, config: RunnableConfig):
     return {"completed_sections": [section]}
 
 def gather_completed_sections(state: ReportState):
-    """ Gather completed sections from research and format them as context for writing the final sections """    
-
+    """Gather completed sections from research and format them as context for writing the final sections."""    
     # List of completed sections
     completed_sections = state["completed_sections"]
 
@@ -325,8 +345,7 @@ def gather_completed_sections(state: ReportState):
     return {"report_sections_from_research": completed_report_sections}
 
 def initiate_final_section_writing(state: ReportState):
-    """ Write any final sections using the Send API to parallelize the process """    
-
+    """Write any final sections using the Send API to parallelize the process."""    
     # Kick off section writing in parallel via Send() API for any sections that do not require research
     return [
         Send("write_final_sections", {"topic": state["topic"], "section": s, "report_sections_from_research": state["report_sections_from_research"]}) 
@@ -335,8 +354,7 @@ def initiate_final_section_writing(state: ReportState):
     ]
 
 def compile_final_report(state: ReportState):
-    """ Compile the final report """    
-
+    """Compile the final report."""    
     # Get sections
     sections = state["sections"]
     completed_sections = {s.name: s.content for s in state["completed_sections"]}
