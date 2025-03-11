@@ -1,8 +1,10 @@
+import os
 from typing import Literal
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_openai import OpenAIEmbeddings
 from langgraph.constants import Send
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
@@ -43,22 +45,22 @@ from open_deep_research.state import (
 )
 from open_deep_research.utils import (
     arxiv_search_async,
+    create_vapi_assistant,
     deduplicate_and_format_sources,
     exa_search,
+    extract_text_from_pdf,
     format_sections,
     get_config_value,
     get_search_params,
+    make_vapi_call,
     perplexity_search,
     pubmed_search_async,
-    tavily_search_async,
-    create_vapi_assistant,
-    make_vapi_call,
     setup_embedding_cache,
-    setup_persistent_vectorstore,
     setup_llm_cache,
-    extract_text_from_pdf,
+    setup_persistent_vectorstore,
+    tavily_search_async,
 )
-from langchain_openai import OpenAIEmbeddings
+
 
 # Nodes
 async def generate_report_plan(state: ReportState, config: RunnableConfig):
@@ -578,10 +580,10 @@ def configure_vapi_calls(state: LegislationState, config: RunnableConfig):
     
     # Get configuration
     configurable = Configuration.from_runnable_config(config)
-    from_number = configurable.vapi_from_number
-    
-    # If no from number is configured, we can't make calls
-    if not from_number:
+    phone_number_id = configurable.vapi_phone_id
+
+    # If no phone number ID is configured, we can't make calls
+    if not phone_number_id:
         return {"vapi_configs": []}
     
     # Configure Vapi calls for politicians with phone numbers
@@ -598,8 +600,9 @@ def configure_vapi_calls(state: LegislationState, config: RunnableConfig):
             # Configure the call
             vapi_config = VapiCallConfig(
                 assistant_id=assistant_id,
-                from_number=from_number,
-                to_number=politician.phone_number,
+                phone_number_id=phone_number_id,
+                customer_number=configurable.vapi_to_number or os.getenv('TEST_NUMBER'), # or politician.phone_number,
+                customer_name=politician.name,
                 first_message=script.introduction,
                 system_prompt=system_prompt
             )
@@ -608,7 +611,7 @@ def configure_vapi_calls(state: LegislationState, config: RunnableConfig):
     
     return {"vapi_configs": vapi_configs}
 
-def legislation_human_feedback(state: LegislationState) -> Command[Literal[END, "make_calls"]]:
+def call_scripts_human_feedback(state: LegislationState) -> Command[Literal[END, "make_calls"]]:
     """Get human feedback on call scripts and configurations."""
     # Get state
     analysis = state["analysis"]
@@ -616,30 +619,35 @@ def legislation_human_feedback(state: LegislationState) -> Command[Literal[END, 
     call_scripts = state["call_scripts"]
     vapi_configs = state["vapi_configs"]
     
-    # Format information for human review
     review_info = f"""
-    ## Legislation Analysis
-    
-    {analysis.summary}
-    
-    ## Impact on Animal Welfare
-    
-    {analysis.animal_welfare_impact}
-    
-    ## Politicians and Call Scripts
-    
+        {vapi_configs}
+    Approve these call scripts and proceed with calls? Reply 'yes' to approve or provide feedback for changes.
     """
     
-    for i, (politician, script) in enumerate(zip(politicians, call_scripts)):
-        review_info += f"""
-        ### {i+1}. {politician.name} ({politician.position})
+    # # Format information for human review
+    # review_info = f"""
+    # ## Legislation Analysis
+    
+    # {analysis.summary}
+    
+    # ## Impact on Animal Welfare
+    
+    # {analysis.animal_welfare_impact}
+    
+    # ## Politicians and Call Scripts
+    
+    # """
+    
+    # for i, (politician, script) in enumerate(zip(politicians, call_scripts)):
+    #     review_info += f"""
+    #     ### {i+1}. {politician.name} ({politician.position})
         
-        **Phone:** {politician.phone_number or "Not available"}
+    #     **Phone:** {politician.phone_number or "Not available"}
         
-        **Script:**
-        {script.full_script}
+    #     **Script:**
+    #     {script.full_script}
         
-        """
+    #     """
     
     # Get feedback
     feedback = interrupt(f"""
@@ -658,8 +666,10 @@ def legislation_human_feedback(state: LegislationState) -> Command[Literal[END, 
         # Not approved - end workflow
         return Command(goto=END)
 
-def make_calls(state: LegislationState):
+def make_calls(state: LegislationState, config: RunnableConfig):
     """Make approved calls using Vapi."""
+    configurable = Configuration.from_runnable_config(config)
+    
     # Get approved calls
     approved_calls = state["approved_calls"]
     
@@ -668,9 +678,8 @@ def make_calls(state: LegislationState):
     for call_config in approved_calls:
         result = make_vapi_call(
             assistant_id=call_config.assistant_id,
-            from_number=call_config.from_number,
-            to_number=call_config.to_number,
-            first_message=call_config.first_message
+            phone_number_id=configurable.vapi_phone_id,
+            customer_number=configurable.vapi_to_number or os.getenv('TEST_NUMBER') #call_config.customer_number,
         )
         call_results.append(result)
     
@@ -707,21 +716,21 @@ politician_research_graph = politician_research.compile()
 # Outer graph for report generation -- 
 
 # Add nodes
-builder = StateGraph(ReportState, input=ReportStateInput, output=ReportStateOutput, config_schema=Configuration)
-builder.add_node("generate_report_plan", generate_report_plan)
-builder.add_node("human_feedback", human_feedback)
-builder.add_node("build_section_with_web_research", section_builder.compile())
-builder.add_node("gather_completed_sections", gather_completed_sections)
-builder.add_node("write_final_sections", write_final_sections)
-builder.add_node("compile_final_report", compile_final_report)
+# builder = StateGraph(ReportState, input=ReportStateInput, output=ReportStateOutput, config_schema=Configuration)
+# builder.add_node("generate_report_plan", generate_report_plan)
+# builder.add_node("human_feedback", human_feedback)
+# builder.add_node("build_section_with_web_research", section_builder.compile())
+# builder.add_node("gather_completed_sections", gather_completed_sections)
+# builder.add_node("write_final_sections", write_final_sections)
+# builder.add_node("compile_final_report", compile_final_report)
 
-# Add edges
-builder.add_edge(START, "generate_report_plan")
-builder.add_edge("generate_report_plan", "human_feedback")
-builder.add_edge("build_section_with_web_research", "gather_completed_sections")
-builder.add_conditional_edges("gather_completed_sections", initiate_final_section_writing, ["write_final_sections"])
-builder.add_edge("write_final_sections", "compile_final_report")
-builder.add_edge("compile_final_report", END)
+# # Add edges
+# builder.add_edge(START, "generate_report_plan")
+# builder.add_edge("generate_report_plan", "human_feedback")
+# builder.add_edge("build_section_with_web_research", "gather_completed_sections")
+# builder.add_conditional_edges("gather_completed_sections", initiate_final_section_writing, ["write_final_sections"])
+# builder.add_edge("write_final_sections", "compile_final_report")
+# builder.add_edge("compile_final_report", END)
 
 # Legislation analysis graph
 legislation_analysis = StateGraph(LegislationState, input=LegislationStateInput, output=LegislationStateOutput, config_schema=Configuration)
@@ -730,7 +739,7 @@ legislation_analysis.add_node("identify_politicians_to_research", identify_polit
 legislation_analysis.add_node("research_politician", politician_research_graph)
 legislation_analysis.add_node("generate_call_scripts", generate_call_scripts)
 legislation_analysis.add_node("configure_vapi_calls", configure_vapi_calls)
-legislation_analysis.add_node("human_feedback", legislation_human_feedback)
+legislation_analysis.add_node("call_scripts_human_feedback", call_scripts_human_feedback)
 legislation_analysis.add_node("make_calls", make_calls)
 
 # Add edges to the legislation analysis graph
@@ -738,12 +747,12 @@ legislation_analysis.add_edge(START, "analyze_legislation")
 legislation_analysis.add_edge("analyze_legislation", "identify_politicians_to_research")
 legislation_analysis.add_edge("research_politician", "generate_call_scripts")
 legislation_analysis.add_edge("generate_call_scripts", "configure_vapi_calls")
-legislation_analysis.add_edge("configure_vapi_calls", "human_feedback")
-legislation_analysis.add_edge("human_feedback", "make_calls")
+legislation_analysis.add_edge("configure_vapi_calls", "call_scripts_human_feedback")
+legislation_analysis.add_edge("call_scripts_human_feedback", "make_calls")
 legislation_analysis.add_edge("make_calls", END)
 
 # Compile the graphs
-report_graph = builder.compile()
+# report_graph = builder.compile()
 legislation_graph = legislation_analysis.compile()
 
 # Initialize caching and persistence

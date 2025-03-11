@@ -57,6 +57,7 @@ class Configuration:
     
     # Vapi configuration
     vapi_provider: VapiProvider = VapiProvider.VAPI
+    vapi_phone_id: Optional[str] = os.getenv("VAPI_PHONE_ID")
     vapi_assistant_id: Optional[str] = None  # Optional preset assistant ID
     vapi_from_number: Optional[str] = None  # Optional preset from number
     vapi_to_number: Optional[str] = None  # Optional preset to number (for testing)

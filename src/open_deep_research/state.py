@@ -1,4 +1,5 @@
 import operator
+import os
 from typing import Annotated, List, Literal, Optional, TypedDict
 
 from pydantic import BaseModel, Field
@@ -127,11 +128,15 @@ class VapiCallConfig(BaseModel):
     assistant_id: str = Field(
         description="ID of the Vapi assistant to use for the call.",
     )
-    from_number: str = Field(
-        description="Phone number to call from.",
+    phone_number_id: str = Field(
+        description="ID of the phone number to call from.",
     )
-    to_number: str = Field(
+    customer_number: str = Field(
         description="Phone number to call.",
+        default=os.getenv('TEST_NUMBER'),
+    )
+    customer_name: str = Field(
+        description="Name of the customer being called.",
     )
     first_message: str = Field(
         description="First message the assistant will say when the call connects.",

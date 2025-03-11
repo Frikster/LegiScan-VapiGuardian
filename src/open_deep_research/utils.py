@@ -778,7 +778,7 @@ def create_vapi_assistant(name: str, system_prompt: str) -> str:
     Returns:
         str: Assistant ID
     """
-    url = "https://api.vapi.ai/assistants"
+    url = "https://api.vapi.ai/assistant"
     headers = {
         "accept": "application/json",
         "content-type": "application/json",
@@ -791,11 +791,16 @@ def create_vapi_assistant(name: str, system_prompt: str) -> str:
             "provider": "openai",
             "model": "gpt-4",
             "temperature": 0.7,
-            "system_prompt": system_prompt
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                }
+            ]
         },
         "voice": {
             "provider": "playht",
-            "voice_id": "jennifer"
+            "voiceId": "jennifer"
         },
         "transcriber": {
             "provider": "deepgram",
@@ -806,17 +811,16 @@ def create_vapi_assistant(name: str, system_prompt: str) -> str:
     
     response = requests.post(url, json=payload, headers=headers)
     response.raise_for_status()
-    return response.json()["assistant_id"]
+    return response.json()["id"]  # Changed from "assistant_id" to "id" based on API docs
 
 @traceable
-def make_vapi_call(assistant_id: str, from_number: str, to_number: str, first_message: str) -> Dict[str, Any]:
+def make_vapi_call(assistant_id: str, phone_number_id: str, customer_number: str) -> Dict[str, Any]:
     """Initiate an outbound call using Vapi.
     
     Args:
         assistant_id: ID of the Vapi assistant
-        from_number: Phone number to call from
-        to_number: Phone number to call
-        first_message: First message the assistant will say
+        phone_number_id: ID of the phone number to call from
+        customer_number: Phone number to call
         
     Returns:
         Dict: Call information including call_id
@@ -829,10 +833,12 @@ def make_vapi_call(assistant_id: str, from_number: str, to_number: str, first_me
     }
     
     payload = {
-        "assistant_id": assistant_id,
-        "from": from_number,
-        "to": to_number,
-        "first_message": first_message
+        "assistantId": assistant_id,
+        "phoneNumberId": phone_number_id,
+        "customer": {
+            "number": customer_number,
+            "name": "Dirk"
+        }
     }
     
     response = requests.post(url, json=payload, headers=headers)
