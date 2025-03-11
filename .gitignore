@@ -170,6 +170,10 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Macbook-specific
+.DS_Store
+
+# Project-specific
 llm/
 example/
 data/
