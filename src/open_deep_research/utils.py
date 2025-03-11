@@ -1,15 +1,15 @@
-
-import os
 import asyncio
-import requests
+import os
+from typing import Any, Dict, List, Optional
 
-from tavily import TavilyClient, AsyncTavilyClient
+import requests
+from exa_py import Exa
 from langchain_community.retrievers import ArxivRetriever
 from langchain_community.utilities.pubmed import PubMedAPIWrapper
-from exa_py import Exa
-from typing import List, Optional, Dict, Any
-from open_deep_research.state import Section
 from langsmith import traceable
+from tavily import AsyncTavilyClient, TavilyClient
+
+from open_deep_research.state import Section
 
 tavily_client = TavilyClient()
 tavily_async_client = AsyncTavilyClient()
@@ -765,3 +765,190 @@ async def pubmed_search_async(search_queries, top_k_results=5, email=None, api_k
             delay = min(5.0, delay * 1.5)  # Don't exceed 5 seconds
     
     return search_docs
+
+
+@traceable
+def create_vapi_assistant(name: str, system_prompt: str) -> str:
+    """Create a new Vapi assistant.
+    
+    Args:
+        name: Name for the assistant
+        system_prompt: System prompt for the assistant
+        
+    Returns:
+        str: Assistant ID
+    """
+    url = "https://api.vapi.ai/assistants"
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    payload = {
+        "name": name,
+        "model": {
+            "provider": "openai",
+            "model": "gpt-4",
+            "temperature": 0.7,
+            "system_prompt": system_prompt
+        },
+        "voice": {
+            "provider": "playht",
+            "voice_id": "jennifer"
+        },
+        "transcriber": {
+            "provider": "deepgram",
+            "model": "nova-2",
+            "language": "en"
+        }
+    }
+    
+    response = requests.post(url, json=payload, headers=headers)
+    response.raise_for_status()
+    return response.json()["assistant_id"]
+
+@traceable
+def make_vapi_call(assistant_id: str, from_number: str, to_number: str, first_message: str) -> Dict[str, Any]:
+    """Initiate an outbound call using Vapi.
+    
+    Args:
+        assistant_id: ID of the Vapi assistant
+        from_number: Phone number to call from
+        to_number: Phone number to call
+        first_message: First message the assistant will say
+        
+    Returns:
+        Dict: Call information including call_id
+    """
+    url = "https://api.vapi.ai/call"
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    payload = {
+        "assistant_id": assistant_id,
+        "from": from_number,
+        "to": to_number,
+        "first_message": first_message
+    }
+    
+    response = requests.post(url, json=payload, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+@traceable
+def get_vapi_call_status(call_id: str) -> Dict[str, Any]:
+    """Get the status of a Vapi call.
+    
+    Args:
+        call_id: ID of the call
+        
+    Returns:
+        Dict: Call status information
+    """
+    url = f"https://api.vapi.ai/call/{call_id}"
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+# Add caching utilities based on the notebook example
+def setup_embedding_cache(embedding_model, namespace: str):
+    """Set up cache-backed embeddings.
+    
+    Args:
+        embedding_model: Base embedding model
+        namespace: Namespace for the cache
+        
+    Returns:
+        CacheBackedEmbeddings: Cached embedding model
+    """
+    import hashlib
+
+    from langchain.embeddings import CacheBackedEmbeddings
+    from langchain.storage import LocalFileStore
+    
+    # Create a safe namespace by hashing the model identifier
+    safe_namespace = hashlib.md5(namespace.encode()).hexdigest()
+    
+    # Set up local file store for cache
+    store = LocalFileStore("./cache/")
+    
+    # Create cache-backed embeddings
+    return CacheBackedEmbeddings.from_bytes_store(
+        embedding_model, store, namespace=safe_namespace, batch_size=32
+    )
+
+def setup_persistent_vectorstore(embedding_model, collection_name: str, path: str = "./vector_store"):
+    """Set up a persistent vector store.
+    
+    Args:
+        embedding_model: Embedding model to use
+        collection_name: Name for the collection
+        path: Path to store the vector database
+        
+    Returns:
+        VectorStore: Configured vector store
+    """
+    from langchain_qdrant import QdrantVectorStore
+    from qdrant_client import QdrantClient
+    from qdrant_client.http.models import Distance, VectorParams
+    
+    # Create Qdrant client with persistent storage
+    client = QdrantClient(path=path)
+    
+    # Check if collection exists, create if not
+    collections = client.get_collections().collections
+    collection_names = [collection.name for collection in collections]
+    
+    if collection_name not in collection_names:
+        # Create new collection
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+        )
+    
+    # Create vector store
+    return QdrantVectorStore(
+        client=client,
+        collection_name=collection_name,
+        embedding=embedding_model
+    )
+
+def setup_llm_cache():
+    """Set up LLM response caching."""
+    from langchain_core.caches import SQLiteCache
+    from langchain_core.globals import set_llm_cache
+    
+    # Use SQLite for persistent caching
+    set_llm_cache(SQLiteCache(database_path="./cache/llm_cache.db"))
+
+@traceable
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """Extract text from a PDF file.
+    
+    Args:
+        pdf_path: Path to the PDF file
+        
+    Returns:
+        str: Extracted text from the PDF
+    """
+    from langchain_community.document_loaders import PyMuPDFLoader
+    
+    loader = PyMuPDFLoader(pdf_path)
+    documents = loader.load()
+    
+    # Combine all document pages into a single text
+    text = "\n\n".join([doc.page_content for doc in documents])
+    
+    # Log the text length for tracing
+    print(f"Extracted {len(text)} characters from {pdf_path}")
+    
+    return text

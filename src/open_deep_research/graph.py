@@ -9,22 +9,37 @@ from langgraph.types import Command, interrupt
 
 from open_deep_research.configuration import Configuration
 from open_deep_research.prompts import (
+    call_script_generation_instructions,
     final_section_writer_instructions,
+    legislation_analysis_prompt,
+    politician_query_writer_instructions,
+    politician_research_instructions,
     query_writer_instructions,
     report_planner_instructions,
     report_planner_query_writer_instructions,
     section_grader_instructions,
     section_writer_instructions,
+    vapi_system_prompt_template,
 )
 from open_deep_research.state import (
+    CallScript,
     Feedback,
+    LegislationAnalysis,
+    LegislationState,
+    LegislationStateInput,
+    LegislationStateOutput,
+    Politician,
+    PoliticianResearchOutput,
+    PoliticianResearchState,
     Queries,
     ReportState,
     ReportStateInput,
     ReportStateOutput,
+    SearchQuery,
     SectionOutputState,
     Sections,
     SectionState,
+    VapiCallConfig,
 )
 from open_deep_research.utils import (
     arxiv_search_async,
@@ -36,8 +51,14 @@ from open_deep_research.utils import (
     perplexity_search,
     pubmed_search_async,
     tavily_search_async,
+    create_vapi_assistant,
+    make_vapi_call,
+    setup_embedding_cache,
+    setup_persistent_vectorstore,
+    setup_llm_cache,
+    extract_text_from_pdf,
 )
-
+from langchain_openai import OpenAIEmbeddings
 
 # Nodes
 async def generate_report_plan(state: ReportState, config: RunnableConfig):
@@ -368,6 +389,293 @@ def compile_final_report(state: ReportState):
 
     return {"final_report": all_sections}
 
+
+# New nodes for legislation analysis workflow
+def analyze_legislation(state: LegislationState, config: RunnableConfig):
+    """Analyze the legislation for animal welfare implications."""  
+    legislation_path = state["legislation_path"]
+    
+    # If we have a path but no text, extract text from the PDF
+    # if not legislation_text and legislation_path:
+    legislation_text = extract_text_from_pdf(legislation_path)
+    
+    # If we still don't have text, raise an error
+    if not legislation_text:
+        raise ValueError("No legislation text or valid PDF path provided")
+    
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    
+    # Set up LLM
+    planner_provider = get_config_value(configurable.planner_provider)
+    planner_model = get_config_value(configurable.planner_model)
+    llm = init_chat_model(model=planner_model, model_provider=planner_provider)
+    
+    # Add the extracted text to the trace
+    # from langsmith import trace
+    # with trace("legislation_text_extraction") as span:
+    #     span.add_inputs({"legislation_text": legislation_text})
+    
+    # Analyze legislation - use structured output directly
+    system_message = legislation_analysis_prompt.format(legislation_text=legislation_text)
+    
+    # Only make one LLM call with structured output
+    structured_llm = llm.with_structured_output(LegislationAnalysis)
+    analysis = structured_llm.invoke([
+        SystemMessage(content=system_message),
+        HumanMessage(content="Provide a structured analysis of this legislation with focus on animal welfare implications.")
+    ])
+    
+    # Return analysis
+    return {"analysis": analysis, "legislation_text": legislation_text}
+
+def identify_politicians_to_research(state: LegislationState, config: RunnableConfig) -> Command[Literal["research_politician"]]:
+    """Identify politicians to research and kick off parallel research."""
+    # Get analysis
+    analysis = state["analysis"]
+    legislation_text = state["legislation_text"]
+    
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    max_politicians = configurable.number_of_politicians
+    
+    # Limit to the specified number of politicians
+    politicians_to_research = analysis.key_politicians[:max_politicians]
+    
+    # Initialize the politicians list if it doesn't exist
+    if "politicians" not in state or not state["politicians"]:
+        state["politicians"] = []
+    
+    # Kick off politician research in parallel
+    return Command(goto=[
+        Send("research_politician", {
+            "politician_name": politician.name,
+            "legislation_text": legislation_text
+        }) for politician in politicians_to_research
+    ])
+
+def generate_politician_queries(state: PoliticianResearchState, config: RunnableConfig):
+    """Generate search queries for researching a politician."""
+    # Get state
+    politician_name = state["politician_name"]
+    legislation_text = state["legislation_text"]
+    
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    number_of_queries = configurable.number_of_queries
+    
+    # Set up LLM
+    writer_provider = get_config_value(configurable.writer_provider)
+    writer_model = get_config_value(configurable.writer_model)
+    llm = init_chat_model(model=writer_model, model_provider=writer_provider)
+    structured_llm = llm.with_structured_output(Queries)
+    
+    # Generate queries
+    system_instructions = politician_query_writer_instructions.format(
+        politician_name=politician_name,
+        legislation_context=legislation_text,
+        number_of_queries=number_of_queries
+    )
+    
+    queries = structured_llm.invoke([
+        SystemMessage(content=system_instructions),
+        HumanMessage(content="Generate search queries to research this politician.")
+    ])
+    
+    return {"search_queries": queries.queries}
+
+async def search_politician_info(state: PoliticianResearchState, config: RunnableConfig):
+    """Search for information about the politician."""
+    # Get state
+    search_queries = state["search_queries"]
+    
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    search_api = get_config_value(configurable.search_api)
+    
+    # Web search
+    query_list = [query.search_query for query in search_queries]
+    
+    # Search the web
+    if search_api == "tavily":
+        search_results = await tavily_search_async(query_list)
+        source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
+    elif search_api == "exa":
+        search_results = await exa_search(query_list)
+        source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
+    else:
+        raise ValueError(f"Unsupported search API: {search_api}")
+    
+    return {"source_str": source_str}
+
+def research_politician(state: PoliticianResearchState, config: RunnableConfig):
+    """Research a politician based on search results."""
+    # Get state
+    politician_name = state["politician_name"]
+    legislation_text = state["legislation_text"]
+    source_str = state["source_str"]
+    
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    
+    # Set up LLM
+    writer_provider = get_config_value(configurable.writer_provider)
+    writer_model = get_config_value(configurable.writer_model)
+    llm = init_chat_model(model=writer_model, model_provider=writer_provider)
+    structured_llm = llm.with_structured_output(Politician)
+    
+    # Research politician
+    system_instructions = politician_research_instructions.format(
+        politician_name=politician_name,
+        legislation_context=legislation_text,
+        context=source_str
+    )
+    
+    politician = structured_llm.invoke([
+        SystemMessage(content=system_instructions),
+        HumanMessage(content="Research this politician based on the provided sources.")
+    ])
+    
+    return {"politicians": [politician]}  # Return as a list for proper aggregation
+
+def generate_call_scripts(state: LegislationState, config: RunnableConfig):
+    """Generate call scripts for each politician."""
+    # Get state
+    analysis = state["analysis"]
+    politicians = state["politicians"]
+    
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    
+    # Set up LLM
+    writer_provider = get_config_value(configurable.writer_provider)
+    writer_model = get_config_value(configurable.writer_model)
+    llm = init_chat_model(model=writer_model, model_provider=writer_provider)
+    structured_llm = llm.with_structured_output(CallScript)
+    
+    # Generate call scripts for each politician
+    call_scripts = []
+    for politician in politicians:
+        system_instructions = call_script_generation_instructions.format(
+            politician_profile=politician.model_dump_json(),
+            legislation_summary=analysis.summary
+        )
+        
+        script = structured_llm.invoke([
+            SystemMessage(content=system_instructions),
+            HumanMessage(content="Generate a call script for this politician.")
+        ])
+        
+        call_scripts.append(script)
+    
+    return {"call_scripts": call_scripts}
+
+def configure_vapi_calls(state: LegislationState, config: RunnableConfig):
+    """Configure Vapi calls for each politician with a phone number."""
+    # Get state
+    politicians = state["politicians"]
+    call_scripts = state["call_scripts"]
+    
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    from_number = configurable.vapi_from_number
+    
+    # If no from number is configured, we can't make calls
+    if not from_number:
+        return {"vapi_configs": []}
+    
+    # Configure Vapi calls for politicians with phone numbers
+    vapi_configs = []
+    for politician, script in zip(politicians, call_scripts):
+        if politician.phone_number:
+            # Create a new Vapi assistant for this call
+            system_prompt = vapi_system_prompt_template.format(call_script=script.full_script)
+            assistant_id = create_vapi_assistant(
+                name=f"Animal Welfare Advocate - {politician.name}",
+                system_prompt=system_prompt
+            )
+            
+            # Configure the call
+            vapi_config = VapiCallConfig(
+                assistant_id=assistant_id,
+                from_number=from_number,
+                to_number=politician.phone_number,
+                first_message=script.introduction,
+                system_prompt=system_prompt
+            )
+            
+            vapi_configs.append(vapi_config)
+    
+    return {"vapi_configs": vapi_configs}
+
+def legislation_human_feedback(state: LegislationState) -> Command[Literal[END, "make_calls"]]:
+    """Get human feedback on call scripts and configurations."""
+    # Get state
+    analysis = state["analysis"]
+    politicians = state["politicians"]
+    call_scripts = state["call_scripts"]
+    vapi_configs = state["vapi_configs"]
+    
+    # Format information for human review
+    review_info = f"""
+    ## Legislation Analysis
+    
+    {analysis.summary}
+    
+    ## Impact on Animal Welfare
+    
+    {analysis.animal_welfare_impact}
+    
+    ## Politicians and Call Scripts
+    
+    """
+    
+    for i, (politician, script) in enumerate(zip(politicians, call_scripts)):
+        review_info += f"""
+        ### {i+1}. {politician.name} ({politician.position})
+        
+        **Phone:** {politician.phone_number or "Not available"}
+        
+        **Script:**
+        {script.full_script}
+        
+        """
+    
+    # Get feedback
+    feedback = interrupt(f"""
+    Please review the legislation analysis and call scripts:
+    
+    {review_info}
+    
+    Approve these call scripts and proceed with calls? Reply 'yes' to approve or provide feedback for changes.
+    """)
+    
+    # Process feedback
+    if isinstance(feedback, str) and feedback.lower() == "yes":
+        # Approved - proceed with calls
+        return Command(goto="make_calls", update={"approved_calls": vapi_configs})
+    else:
+        # Not approved - end workflow
+        return Command(goto=END)
+
+def make_calls(state: LegislationState):
+    """Make approved calls using Vapi."""
+    # Get approved calls
+    approved_calls = state["approved_calls"]
+    
+    # Make calls
+    call_results = []
+    for call_config in approved_calls:
+        result = make_vapi_call(
+            assistant_id=call_config.assistant_id,
+            from_number=call_config.from_number,
+            to_number=call_config.to_number,
+            first_message=call_config.first_message
+        )
+        call_results.append(result)
+    
+    return {"call_results": call_results}
+
 # Report section sub-graph -- 
 
 # Add nodes 
@@ -381,7 +689,22 @@ section_builder.add_edge(START, "generate_queries")
 section_builder.add_edge("generate_queries", "search_web")
 section_builder.add_edge("search_web", "write_section")
 
-# Outer graph -- 
+# Politician research sub-graph
+politician_research = StateGraph(PoliticianResearchState, output=PoliticianResearchOutput)
+politician_research.add_node("generate_politician_queries", generate_politician_queries)
+politician_research.add_node("search_politician_info", search_politician_info)
+politician_research.add_node("research_politician", research_politician)
+
+# Add edges to the politician research sub-graph
+politician_research.add_edge(START, "generate_politician_queries")
+politician_research.add_edge("generate_politician_queries", "search_politician_info")
+politician_research.add_edge("search_politician_info", "research_politician")
+politician_research.add_edge("research_politician", END)
+
+# Compile the politician research sub-graph
+politician_research_graph = politician_research.compile()
+
+# Outer graph for report generation -- 
 
 # Add nodes
 builder = StateGraph(ReportState, input=ReportStateInput, output=ReportStateOutput, config_schema=Configuration)
@@ -400,4 +723,43 @@ builder.add_conditional_edges("gather_completed_sections", initiate_final_sectio
 builder.add_edge("write_final_sections", "compile_final_report")
 builder.add_edge("compile_final_report", END)
 
-graph = builder.compile()
+# Legislation analysis graph
+legislation_analysis = StateGraph(LegislationState, input=LegislationStateInput, output=LegislationStateOutput, config_schema=Configuration)
+legislation_analysis.add_node("analyze_legislation", analyze_legislation)
+legislation_analysis.add_node("identify_politicians_to_research", identify_politicians_to_research)
+legislation_analysis.add_node("research_politician", politician_research_graph)
+legislation_analysis.add_node("generate_call_scripts", generate_call_scripts)
+legislation_analysis.add_node("configure_vapi_calls", configure_vapi_calls)
+legislation_analysis.add_node("human_feedback", legislation_human_feedback)
+legislation_analysis.add_node("make_calls", make_calls)
+
+# Add edges to the legislation analysis graph
+legislation_analysis.add_edge(START, "analyze_legislation")
+legislation_analysis.add_edge("analyze_legislation", "identify_politicians_to_research")
+legislation_analysis.add_edge("research_politician", "generate_call_scripts")
+legislation_analysis.add_edge("generate_call_scripts", "configure_vapi_calls")
+legislation_analysis.add_edge("configure_vapi_calls", "human_feedback")
+legislation_analysis.add_edge("human_feedback", "make_calls")
+legislation_analysis.add_edge("make_calls", END)
+
+# Compile the graphs
+report_graph = builder.compile()
+legislation_graph = legislation_analysis.compile()
+
+# Initialize caching and persistence
+def init_caching():
+    """Initialize caching and persistence for the application."""
+    # Set up LLM cache
+    setup_llm_cache()
+    
+    # Set up embeddings with cache
+    base_embeddings = OpenAIEmbeddings()
+    cached_embeddings = setup_embedding_cache(base_embeddings, "legislation_analysis")
+    
+    # Set up persistent vector store
+    vectorstore = setup_persistent_vectorstore(cached_embeddings, "legislation_analysis")
+    
+    return vectorstore
+
+# Choose which graph to use based on the application mode
+graph = legislation_graph  # Default to legislation analysis

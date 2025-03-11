@@ -1,6 +1,8 @@
-from typing import Annotated, List, TypedDict, Literal
-from pydantic import BaseModel, Field
 import operator
+from typing import Annotated, List, Literal, Optional, TypedDict
+
+from pydantic import BaseModel, Field
+
 
 class Section(BaseModel):
     name: str = Field(
@@ -62,3 +64,105 @@ class SectionState(TypedDict):
 
 class SectionOutputState(TypedDict):
     completed_sections: list[Section] # Final key we duplicate in outer state for Send() API
+
+class Politician(BaseModel):
+    name: str = Field(
+        description="Name of the politician.",
+    )
+    position: str = Field(
+        description="Current political position/office.",
+    )
+    contact_info: str = Field(
+        description="Contact information including phone number if available.",
+    )
+    background: str = Field(
+        description="Political background and relevant history.",
+    )
+    stance_on_animals: str = Field(
+        description="Known positions on animal welfare issues.",
+    )
+    financial_backing: str = Field(
+        description="Information about financial supporters and donors.",
+    )
+    phone_number: Optional[str] = Field(
+        description="Phone number to call, if available.",
+        default=None
+    )
+
+class CallScript(BaseModel):
+    politician: str = Field(
+        description="Name of the politician this script is for.",
+    )
+    introduction: str = Field(
+        description="Introduction for the call that mentions the legislation.",
+    )
+    key_points: List[str] = Field(
+        description="Key talking points tailored to the politician's background.",
+    )
+    ask: str = Field(
+        description="The specific request or action being asked of the politician.",
+    )
+    closing: str = Field(
+        description="Closing statement for the call.",
+    )
+    full_script: str = Field(
+        description="Complete call script combining all elements.",
+    )
+
+class LegislationAnalysis(BaseModel):
+    summary: str = Field(
+        description="Summary of the legislation's content and implications.",
+    )
+    animal_welfare_impact: str = Field(
+        description="Analysis of how the legislation affects animal welfare.",
+    )
+    key_politicians: List[Politician] = Field(
+        description="List of politicians relevant to this legislation.",
+    )
+    recommended_actions: List[str] = Field(
+        description="Recommended advocacy actions based on the analysis.",
+    )
+
+class VapiCallConfig(BaseModel):
+    assistant_id: str = Field(
+        description="ID of the Vapi assistant to use for the call.",
+    )
+    from_number: str = Field(
+        description="Phone number to call from.",
+    )
+    to_number: str = Field(
+        description="Phone number to call.",
+    )
+    first_message: str = Field(
+        description="First message the assistant will say when the call connects.",
+    )
+    system_prompt: str = Field(
+        description="System prompt for the assistant to use during the call.",
+    )
+
+class LegislationStateInput(TypedDict):
+    legislation_path: str  # Path to legislation PDF file
+    
+class LegislationStateOutput(TypedDict):
+    analysis: LegislationAnalysis  # Analysis of the legislation
+    call_scripts: List[CallScript]  # Generated call scripts
+    vapi_configs: List[VapiCallConfig]  # Vapi call configurations
+
+class LegislationState(TypedDict):
+    legislation_path: str  # Input legislation path
+    legislation_text: str
+    analysis: LegislationAnalysis  # Analysis of the legislation
+    politicians: Annotated[list[Politician], operator.add]  # List of politicians
+    call_scripts: Annotated[list[CallScript], operator.add]  # Generated call scripts
+    vapi_configs: Annotated[list[VapiCallConfig], operator.add]  # Vapi call configurations
+    approved_calls: list[VapiCallConfig]  # Calls approved by the user
+
+class PoliticianResearchState(TypedDict):
+    politician_name: str  # Name of the politician to research
+    legislation_text: str  # Original legislation text for context
+    search_queries: list[SearchQuery]  # Search queries for research
+    source_str: str  # String of formatted source content from web search
+    politician: Politician  # Politician data structure to be populated
+
+class PoliticianResearchOutput(TypedDict):
+    politicians: Annotated[list[Politician], operator.add]  # List of researched politicians

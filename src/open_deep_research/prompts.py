@@ -240,3 +240,111 @@ For Conclusion/Summary:
 - Markdown format
 - Do not include word count or any preamble in your response
 </Quality Checks>"""
+
+# Legislation analysis prompts
+legislation_analysis_prompt = """You are an expert in animal welfare legislation analysis.
+
+<Legislation>
+{legislation_text}
+</Legislation>
+
+<Task>
+Analyze the provided legislation for its implications on animal welfare. Your analysis should include:
+1. A summary of the legislation's content
+2. Specific impacts on animal welfare (positive or negative)
+3. Identification of key politicians mentioned in or relevant to the legislation
+4. Recommended advocacy actions
+
+Be objective in your analysis but highlight areas of concern for animal welfare advocates.
+</Task>
+"""
+
+politician_query_writer_instructions = """You are an expert researcher crafting targeted web search queries to gather comprehensive information about a politician's stance on animal welfare issues.
+
+<Politician>
+{politician_name}
+</Politician>
+
+<Legislation Context>
+{legislation_context}
+</Legislation Context>
+
+<Task>
+Your goal is to generate {number_of_queries} search queries that will help gather comprehensive information about this politician, particularly regarding:
+
+1. Their voting record on animal welfare issues
+2. Public statements about animal rights or welfare
+3. Financial backing from industries that may impact their stance on animal issues
+4. Contact information, especially phone numbers
+5. Background and political history relevant to animal welfare positions
+
+Make the queries specific enough to find high-quality, relevant sources.
+</Task>
+"""
+
+politician_research_instructions = """You are an expert political researcher gathering information on politicians relevant to animal welfare legislation.
+
+<Politician>
+{politician_name}
+</Politician>
+
+<Legislation Context>
+{legislation_context}
+</Legislation Context>
+
+<Source material>
+{context}
+</Source material>
+
+<Task>
+Based on the provided source material, compile a comprehensive profile of the politician with a focus on their relationship to animal welfare issues. Include:
+
+1. Current political position/office
+2. Contact information (especially phone number if available)
+3. Political background and relevant history
+4. Known positions on animal welfare issues
+5. Information about financial supporters and donors
+
+Be factual and objective. If information is not available in the source material, indicate this clearly.
+</Task>
+"""
+
+call_script_generation_instructions = """You are an expert in political advocacy for animal welfare.
+
+<Politician Profile>
+{politician_profile}
+</Politician Profile>
+
+<Legislation>
+{legislation_summary}
+</Legislation>
+
+<Task>
+Create a persuasive call script for contacting this politician about the legislation. The script should:
+
+1. Begin with a brief, polite introduction that mentions the legislation
+2. Include 3-5 key talking points tailored to the politician's background and positions
+3. Make a clear, specific ask related to the legislation
+4. End with a polite closing
+
+The script should be conversational, respectful, and persuasive. It should be tailored to the politician's specific background, positions, and potential concerns.
+</Task>
+"""
+
+vapi_system_prompt_template = """You are an AI assistant making a call on behalf of an animal welfare advocate.
+
+<Call Script>
+{call_script}
+</Call Script>
+
+<Guidelines>
+1. Follow the call script while maintaining a natural, conversational tone
+2. Listen carefully to responses and adapt accordingly
+3. Be polite and respectful at all times
+4. If asked if you are an AI, be honest but emphasize you're calling on behalf of concerned citizens
+5. Keep the conversation focused on the legislation and the specific ask
+6. Thank the person for their time at the end of the call
+
+Your primary goal is to deliver the key points in the script and make the specific ask. Be persistent but polite.
+</Guidelines>
+"""
