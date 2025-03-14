@@ -766,18 +766,99 @@ async def pubmed_search_async(search_queries, top_k_results=5, email=None, api_k
     
     return search_docs
 
+@traceable
+def upload_file_to_vapi(file_path: str, file_name: str = None) -> str:
+    """Upload a file to Vapi.
+    
+    Args:
+        file_path: Path to the file to upload
+        file_name: Optional name for the file (if None, uses the original filename)
+        
+    Returns:
+        str: File ID
+    """
+    import os
+    import pathlib
+    
+    url = "https://api.vapi.ai/file"
+    headers = {
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    # If no file_name is provided, use the original filename
+    if file_name is None:
+        file_name = pathlib.Path(file_path).name
+    
+    # Upload the file directly from the path
+    with open(file_path, 'rb') as f:
+        files = {'file': (file_name, f, 'application/pdf')}
+        response = requests.post(url, headers=headers, files=files)
+        response.raise_for_status()
+        return response.json()["id"]
 
 @traceable
-def create_vapi_assistant(name: str, system_prompt: str) -> str:
+def create_query_tool(file_id: str, name: str = "legislation-query-tool") -> str:
+    """Create a query tool that references a file.
+    
+    Args:
+        file_id: ID of the file to reference
+        name: Name for the query tool
+        
+    Returns:
+        str: Tool ID
+    """
+    import os
+    
+    url = "https://api.vapi.ai/tool"
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    payload = {
+        "type": "query",
+        "function": {
+            "name": name
+        },
+        "knowledgeBases": [
+            {
+                "provider": "google",
+                "name": "legislation-knowledge-base",
+                "description": "Use this knowledge base when the user asks about specific details of the legislation, its provisions, or its implications.",
+                "fileIds": [file_id]
+            }
+        ]
+    }
+    
+    # Pretty print the payload for easier debugging
+    import json
+    print("Query Tool Creation Payload:")
+    print(json.dumps(payload, indent=4))
+    
+    response = requests.post(url, json=payload, headers=headers)
+    response.raise_for_status()
+    return response.json()["id"]
+
+@traceable
+def create_vapi_assistant(name: str, system_prompt: str, first_message: str = None, 
+                         end_call_message: str = None, analysis_plan: dict = None,
+                         tool_id: str = None) -> str:
     """Create a new Vapi assistant.
     
     Args:
         name: Name for the assistant
         system_prompt: System prompt for the assistant
+        first_message: First message the assistant will say when the call connects
+        end_call_message: Message the assistant will say before ending the call
+        analysis_plan: Configuration for call analysis and outcome reporting
+        tool_id: ID of the query tool to attach to the assistant
         
     Returns:
         str: Assistant ID
     """
+    import os
+    
     url = "https://api.vapi.ai/assistant"
     headers = {
         "accept": "application/json",
@@ -789,7 +870,7 @@ def create_vapi_assistant(name: str, system_prompt: str) -> str:
         "name": name,
         "model": {
             "provider": "openai",
-            "model": "gpt-4",
+            "model": "gpt-4o",
             "temperature": 0.7,
             "messages": [
                 {
@@ -809,9 +890,82 @@ def create_vapi_assistant(name: str, system_prompt: str) -> str:
         }
     }
     
+    # Add optional parameters if provided
+    if first_message:
+        payload["firstMessage"] = first_message
+        payload["firstMessageMode"] = "assistant-speaks-first"
+    
+    if end_call_message:
+        payload["endCallMessage"] = end_call_message
+    
+    if analysis_plan:
+        payload["analysisPlan"] = analysis_plan
+    
+    # Configure proper stop speaking behavior
+    payload["stopSpeakingPlan"] = {
+        "acknowledgementPhrases": [
+            "i understand",
+            "i see",
+            "i got it",
+            "i hear you",
+            "im listening",
+            "im with you",
+            "right",
+            "okay",
+            "ok",
+            "sure",
+            "alright",
+            "got it",
+            "understood",
+            "yeah",
+            "yes",
+            "uh-huh",
+            "mm-hmm",
+            "gotcha",
+            "mhmm",
+            "ah",
+            "yeah okay",
+            "yeah sure"
+            ],
+        "interruptionPhrases": [
+            "stop",
+            "shut",
+            "up",
+            "enough",
+            "quiet",
+            "silence",
+            "but",
+            "dont",
+            "not",
+            "no",
+            "hold",
+            "wait",
+            "cut",
+            "pause",
+            "nope",
+            "nah",
+            "nevermind",
+            "never",
+            "bad",
+            "actually"
+        ]
+    }
+    
+    # Add tool ID if provided
+    if tool_id:
+        if "model" not in payload:
+            payload["model"] = {}
+        
+        payload["model"]["toolIds"] = [tool_id]
+    
+    # Pretty print the payload for easier debugging
+    import json
+    print("Assistant Creation Payload:")
+    print(json.dumps(payload, indent=2))
+    
     response = requests.post(url, json=payload, headers=headers)
     response.raise_for_status()
-    return response.json()["id"]  # Changed from "assistant_id" to "id" based on API docs
+    return response.json()["id"]
 
 @traceable
 def make_vapi_call(assistant_id: str, phone_number_id: str, customer_number: str) -> Dict[str, Any]:

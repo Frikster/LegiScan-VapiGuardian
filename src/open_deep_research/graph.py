@@ -59,6 +59,8 @@ from open_deep_research.utils import (
     setup_llm_cache,
     setup_persistent_vectorstore,
     tavily_search_async,
+    upload_file_to_vapi,
+    create_query_tool,
 )
 
 
@@ -559,6 +561,7 @@ def generate_call_scripts(state: LegislationState, config: RunnableConfig):
     call_scripts = []
     for politician in politicians:
         system_instructions = call_script_generation_instructions.format(
+            assistant_name=configurable.vapi_assistant_name,
             politician_profile=politician.model_dump_json(),
             legislation_summary=analysis.summary
         )
@@ -575,36 +578,120 @@ def generate_call_scripts(state: LegislationState, config: RunnableConfig):
 def configure_vapi_calls(state: LegislationState, config: RunnableConfig):
     """Configure Vapi calls for each politician with a phone number."""
     # Get state
-    politicians = state["politicians"]
+    analysis = state["analysis"]
+    legislation_path = state["legislation_path"]
+    politicians = state["politicians"] 
     call_scripts = state["call_scripts"]
     
     # Get configuration
     configurable = Configuration.from_runnable_config(config)
     phone_number_id = configurable.vapi_phone_id
+    assistant_name = configurable.vapi_assistant_name
+    organization_name = configurable.vapi_organization_name
 
     # If no phone number ID is configured, we can't make calls
     if not phone_number_id:
         return {"vapi_configs": []}
     
+    # Upload the legislation file directly from the path
+    file_id = upload_file_to_vapi(legislation_path)
+    
+    # Create a query tool with the uploaded file
+    tool_id = create_query_tool(file_id)
+    
+    # Configure analysis plan for call outcome reporting
+    analysis_plan = {
+        "structuredDataPlan": {
+            "enabled": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "agreed_to_request": {
+                        "type": "boolean",
+                        "description": "Whether the politician agreed to the specific request made in the call"
+                    },
+                    "level_of_support": {
+                        "type": "string",
+                        "enum": ["strongly_supportive", "supportive", "neutral", "opposed", "strongly_opposed"],
+                        "description": "The politician's level of support for the animal welfare position"
+                    },
+                    "key_concerns": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Key concerns or objections raised by the politician"
+                    },
+                    "follow_up_needed": {
+                        "type": "boolean",
+                        "description": "Whether follow-up is needed with this politician"
+                    },
+                    "follow_up_type": {
+                        "type": "string",
+                        "enum": ["call", "email", "meeting", "none"],
+                        "description": "Type of follow-up preferred by the politician"
+                    }
+                },
+                "required": ["agreed_to_request", "level_of_support"]
+            }
+        },
+        "successEvaluationPlan": {
+            "rubric": "AutomaticRubric"
+        }
+    }
+    
     # Configure Vapi calls for politicians with phone numbers
     vapi_configs = []
     for politician, script in zip(politicians, call_scripts):
         if politician.phone_number:
-            # Create a new Vapi assistant for this call
-            system_prompt = vapi_system_prompt_template.format(call_script=script.full_script)
+            # Format key points as a bulleted list
+            key_points_formatted = "\n".join([f"- {point}" for point in script.key_points])
+            
+            # Format legislation analysis as a structured summary
+            legislation_analysis_formatted = f"""
+Summary: {analysis.summary}
+
+Animal Welfare Impact: {analysis.animal_welfare_impact}
+
+Recommended Actions: 
+{chr(10).join([f"- {action}" for action in analysis.recommended_actions])}
+"""
+            
+            # Create system prompt with all context
+            system_prompt = vapi_system_prompt_template.format(
+                assistant_name=assistant_name,
+                organization_name=organization_name,
+                legislation_analysis=legislation_analysis_formatted,
+                politician_profile=politician.model_dump_json(),
+                introduction=script.introduction,
+                key_points=key_points_formatted,
+                ask=script.ask,
+                closing=script.closing,
+                call_script=script.full_script
+            )            
+            
+            # Create a new Vapi assistant for this call with the query tool
             assistant_id = create_vapi_assistant(
-                name=f"Animal Welfare Advocate - {politician.name}",
-                system_prompt=system_prompt
+                name=f"{assistant_name} - {politician.name}",
+                system_prompt=system_prompt,
+                first_message=script.introduction,
+                end_call_message=script.closing,
+                analysis_plan=analysis_plan,
+                tool_id=tool_id
             )
             
             # Configure the call
             vapi_config = VapiCallConfig(
                 assistant_id=assistant_id,
                 phone_number_id=phone_number_id,
-                customer_number=configurable.vapi_to_number or os.getenv('TEST_NUMBER'), # or politician.phone_number,
+                customer_number=configurable.vapi_to_number or os.getenv('TEST_NUMBER'),
                 customer_name=politician.name,
                 first_message=script.introduction,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                assistant_name=assistant_name,
+                organization_name=organization_name,
+                end_call_message=script.closing,
+                analysis_plan=analysis_plan
             )
             
             vapi_configs.append(vapi_config)
@@ -614,9 +701,9 @@ def configure_vapi_calls(state: LegislationState, config: RunnableConfig):
 def call_scripts_human_feedback(state: LegislationState) -> Command[Literal[END, "make_calls"]]:
     """Get human feedback on call scripts and configurations."""
     # Get state
-    analysis = state["analysis"]
-    politicians = state["politicians"]
-    call_scripts = state["call_scripts"]
+    # analysis = state["analysis"]
+    # politicians = state["politicians"]
+    # call_scripts = state["call_scripts"]
     vapi_configs = state["vapi_configs"]
     
     review_info = f"""

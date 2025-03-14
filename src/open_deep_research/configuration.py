@@ -61,6 +61,8 @@ class Configuration:
     vapi_assistant_id: Optional[str] = None  # Optional preset assistant ID
     vapi_from_number: Optional[str] = None  # Optional preset from number
     vapi_to_number: Optional[str] = None  # Optional preset to number (for testing)
+    vapi_assistant_name: str = "Jennifer"
+    vapi_organization_name: str = "The American Century Institute"
     
     # Vector store configuration for persistence
     vector_store_path: str = "./vector_store"  # Path to store vector database

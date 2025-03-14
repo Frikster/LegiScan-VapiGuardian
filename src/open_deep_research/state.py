@@ -66,6 +66,8 @@ class SectionState(TypedDict):
 class SectionOutputState(TypedDict):
     completed_sections: list[Section] # Final key we duplicate in outer state for Send() API
 
+#######
+
 class Politician(BaseModel):
     name: str = Field(
         description="Name of the politician.",
@@ -143,6 +145,22 @@ class VapiCallConfig(BaseModel):
     )
     system_prompt: str = Field(
         description="System prompt for the assistant to use during the call.",
+    )
+    assistant_name: str = Field(
+        description="Name for the assistant to use when referring to itself.",
+        default="Jennifer"
+    )
+    organization_name: str = Field(
+        description="Name of the organization the assistant represents.",
+        default="The American Century Institute"
+    )
+    end_call_message: str = Field(
+        description="Message the assistant will say before ending the call.",
+        default="Thank you for your time. Goodbye!"
+    )
+    analysis_plan: Optional[dict] = Field(
+        description="Configuration for call analysis and outcome reporting.",
+        default=None
     )
 
 class LegislationStateInput(TypedDict):
