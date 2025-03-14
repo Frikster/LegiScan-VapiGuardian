@@ -767,8 +767,152 @@ async def pubmed_search_async(search_queries, top_k_results=5, email=None, api_k
     return search_docs
 
 @traceable
+def list_vapi_files() -> List[Dict[str, Any]]:
+    """List all files in the Vapi account.
+    
+    Returns:
+        List[Dict[str, Any]]: List of file objects
+    """
+    url = "https://api.vapi.ai/file"
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+@traceable
+def delete_vapi_file(file_id: str) -> Dict[str, Any]:
+    """Delete a file from Vapi.
+    
+    Args:
+        file_id: ID of the file to delete
+        
+    Returns:
+        Dict[str, Any]: Response from the API
+    """
+    url = f"https://api.vapi.ai/file/{file_id}"
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    response = requests.delete(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+@traceable
+def list_vapi_tools() -> List[Dict[str, Any]]:
+    """List all tools in the Vapi account.
+    
+    Returns:
+        List[Dict[str, Any]]: List of tool objects
+    """
+    url = "https://api.vapi.ai/tool"
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+@traceable
+def delete_vapi_tool(tool_id: str) -> Dict[str, Any]:
+    """Delete a tool from Vapi.
+    
+    Args:
+        tool_id: ID of the tool to delete
+        
+    Returns:
+        Dict[str, Any]: Response from the API
+    """
+    url = f"https://api.vapi.ai/tool/{tool_id}"
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    response = requests.delete(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+@traceable
+def list_vapi_assistants() -> List[Dict[str, Any]]:
+    """List all assistants in the Vapi account.
+    
+    Returns:
+        List[Dict[str, Any]]: List of assistant objects
+    """
+    url = "https://api.vapi.ai/assistant"
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+@traceable
+def delete_vapi_assistant(assistant_id: str) -> Dict[str, Any]:
+    """Delete an assistant from Vapi.
+    
+    Args:
+        assistant_id: ID of the assistant to delete
+        
+    Returns:
+        Dict[str, Any]: Response from the API
+    """
+    url = f"https://api.vapi.ai/assistant/{assistant_id}"
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
+    }
+    
+    response = requests.delete(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+@traceable
+def cleanup_vapi_resources_by_name(file_name: str = None, tool_name: str = None, assistant_name: str = None):
+    """Clean up Vapi resources by name.
+    
+    Args:
+        file_name: Name of the file to delete (if exists)
+        tool_name: Name of the tool to delete (if exists)
+        assistant_name: Name of the assistant to delete (if exists)
+    """
+    # Clean up files with matching name
+    if file_name:
+        files = list_vapi_files()
+        for file in files:
+            if file.get("name") == file_name or file.get("originalName") == file_name:
+                print(f"Deleting file: {file['name']} (ID: {file['id']})")
+                delete_vapi_file(file["id"])
+    
+    # Clean up tools with matching name
+    if tool_name:
+        tools = list_vapi_tools()
+        for tool in tools:
+            if tool.get("function", {}).get("name") == tool_name:
+                print(f"Deleting tool: {tool['function']['name']} (ID: {tool['id']})")
+                delete_vapi_tool(tool["id"])
+    
+    # Clean up assistants with matching name
+    if assistant_name:
+        assistants = list_vapi_assistants()
+        for assistant in assistants:
+            if assistant.get("name") == assistant_name:
+                print(f"Deleting assistant: {assistant['name']} (ID: {assistant['id']})")
+                delete_vapi_assistant(assistant["id"])
+
+@traceable
 def upload_file_to_vapi(file_path: str, file_name: str = None) -> str:
-    """Upload a file to Vapi.
+    """Upload a file to Vapi, deleting any existing file with the same name.
     
     Args:
         file_path: Path to the file to upload
@@ -780,14 +924,17 @@ def upload_file_to_vapi(file_path: str, file_name: str = None) -> str:
     import os
     import pathlib
     
+    # If no file_name is provided, use the original filename
+    if file_name is None:
+        file_name = pathlib.Path(file_path).name
+    
+    # Clean up any existing file with the same name
+    cleanup_vapi_resources_by_name(file_name=file_name)
+    
     url = "https://api.vapi.ai/file"
     headers = {
         "authorization": f"Bearer {os.getenv('VAPI_API_KEY')}"
     }
-    
-    # If no file_name is provided, use the original filename
-    if file_name is None:
-        file_name = pathlib.Path(file_path).name
     
     # Upload the file directly from the path
     with open(file_path, 'rb') as f:
@@ -798,7 +945,7 @@ def upload_file_to_vapi(file_path: str, file_name: str = None) -> str:
 
 @traceable
 def create_query_tool(file_id: str, name: str = "legislation-query-tool") -> str:
-    """Create a query tool that references a file.
+    """Create a query tool that references a file, deleting any existing tool with the same name.
     
     Args:
         file_id: ID of the file to reference
@@ -808,6 +955,9 @@ def create_query_tool(file_id: str, name: str = "legislation-query-tool") -> str
         str: Tool ID
     """
     import os
+    
+    # Clean up any existing tool with the same name
+    cleanup_vapi_resources_by_name(tool_name=name)
     
     url = "https://api.vapi.ai/tool"
     headers = {
@@ -844,7 +994,7 @@ def create_query_tool(file_id: str, name: str = "legislation-query-tool") -> str
 def create_vapi_assistant(name: str, system_prompt: str, first_message: str = None, 
                          end_call_message: str = None, analysis_plan: dict = None,
                          tool_id: str = None) -> str:
-    """Create a new Vapi assistant.
+    """Create a new Vapi assistant, deleting any existing assistant with the same name.
     
     Args:
         name: Name for the assistant
@@ -858,6 +1008,9 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
         str: Assistant ID
     """
     import os
+    
+    # Clean up any existing assistant with the same name
+    cleanup_vapi_resources_by_name(assistant_name=name)
     
     url = "https://api.vapi.ai/assistant"
     headers = {
