@@ -481,6 +481,7 @@ def generate_politician_queries(state: PoliticianResearchState, config: Runnable
         number_of_queries=number_of_queries
     )
     
+    # TODO: Improve to get multiple variants of arguments based on different conversation paths
     queries = structured_llm.invoke([
         SystemMessage(content=system_instructions),
         HumanMessage(content="Generate search queries to research this politician.")
@@ -499,10 +500,16 @@ async def search_politician_info(state: PoliticianResearchState, config: Runnabl
     
     # Web search
     query_list = [query.search_query for query in search_queries]
+    # TODO
+    # query_list = [query.search_query for query in results.queries]
+    # params_to_pass = get_search_params(search_api, search_api_config)  # Filter parameters
     
     # Search the web
     if search_api == "tavily":
         search_results = await tavily_search_async(query_list)
+        source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
+    elif search_api == "perplexity":
+        search_results = perplexity_search(query_list)
         source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
     elif search_api == "exa":
         search_results = await exa_search(query_list)
@@ -543,7 +550,7 @@ def research_politician(state: PoliticianResearchState, config: RunnableConfig):
     return {"politicians": [politician]}  # Return as a list for proper aggregation
 
 def generate_call_scripts(state: LegislationState, config: RunnableConfig):
-    """Generate call scripts for each politician."""
+    """Generate call scripts for each politician and enhance them to be more conversational and concise."""
     # Get state
     analysis = state["analysis"]
     politicians = state["politicians"]
@@ -579,9 +586,9 @@ def configure_vapi_calls(state: LegislationState, config: RunnableConfig):
     """Configure Vapi calls for each politician with a phone number."""
     # Get state
     analysis = state["analysis"]
-    legislation_path = state["legislation_path"]
-    politicians = state["politicians"] 
+    politicians = state["politicians"]
     call_scripts = state["call_scripts"]
+    legislation_path = state["legislation_path"]
     
     # Get configuration
     configurable = Configuration.from_runnable_config(config)
@@ -663,19 +670,41 @@ Recommended Actions:
                 organization_name=organization_name,
                 legislation_analysis=legislation_analysis_formatted,
                 politician_profile=politician.model_dump_json(),
-                introduction=script.introduction,
                 key_points=key_points_formatted,
                 ask=script.ask,
-                closing=script.closing,
                 call_script=script.full_script
-            )            
+            )
+            
+            # Set up LLM to enhance the system prompt
+            planner_provider = get_config_value(configurable.planner_provider)
+            planner_model = get_config_value(configurable.planner_model)
+            llm = init_chat_model(model=planner_model, model_provider=planner_provider)
+            
+            # Prompt to enhance the system prompt
+            enhancement_prompt = f"""The below is the system prompt given to a vapi call agent. Improve it so that the agent behaves more humanlike and conversational and is sure to get to the point fast. 
+Consider using a method of Extreme TLDR generation, a new form of extreme summarization for paragraphs. TLDR generation involves high source compression, removes stop words and summarizes the paragraph whilst retaining meaning. The result is the shortest possible summary that retains all of the original meaning and context of the paragraph.
+We want the system prompt to make the agent behave so that it is brief and concise as per Extreme TLDR generation but we also want to make sure it is still humanlike and NOT robotic.
+
+SYSTEM PROMPT TO IMPROVE:
+{system_prompt}
+
+IMPROVED SYSTEM PROMPT:"""
+            
+            # Generate enhanced system prompt
+            enhanced_prompt_response = llm.invoke([
+                HumanMessage(content=enhancement_prompt)
+            ])
+            print("enhanced_prompt_response", enhanced_prompt_response)
+            
+            # Extract the enhanced system prompt
+            enhanced_system_prompt = enhanced_prompt_response.content
             
             # Create a new Vapi assistant for this call with the query tool
             assistant_id = create_vapi_assistant(
                 name=f"{assistant_name} - {politician.name}",
-                system_prompt=system_prompt,
-                first_message=script.introduction,
-                end_call_message=script.closing,
+                system_prompt=enhanced_system_prompt,
+                first_message=script.first_message,
+                end_call_message=script.end_call_message,
                 analysis_plan=analysis_plan,
                 tool_id=tool_id
             )
@@ -686,11 +715,12 @@ Recommended Actions:
                 phone_number_id=phone_number_id,
                 customer_number=configurable.vapi_to_number or os.getenv('TEST_NUMBER'),
                 customer_name=politician.name,
-                first_message=script.introduction,
+                first_message=script.first_message,
                 system_prompt=system_prompt,
+                enhanced_system_prompt=enhanced_system_prompt,
                 assistant_name=assistant_name,
                 organization_name=organization_name,
-                end_call_message=script.closing,
+                end_call_message=script.end_call_message,
                 analysis_plan=analysis_plan
             )
             
@@ -774,16 +804,16 @@ def make_calls(state: LegislationState, config: RunnableConfig):
 
 # Report section sub-graph -- 
 
-# Add nodes 
-section_builder = StateGraph(SectionState, output=SectionOutputState)
-section_builder.add_node("generate_queries", generate_queries)
-section_builder.add_node("search_web", search_web)
-section_builder.add_node("write_section", write_section)
+# # Add nodes 
+# section_builder = StateGraph(SectionState, output=SectionOutputState)
+# section_builder.add_node("generate_queries", generate_queries)
+# section_builder.add_node("search_web", search_web)
+# section_builder.add_node("write_section", write_section)
 
-# Add edges
-section_builder.add_edge(START, "generate_queries")
-section_builder.add_edge("generate_queries", "search_web")
-section_builder.add_edge("search_web", "write_section")
+# # Add edges
+# section_builder.add_edge(START, "generate_queries")
+# section_builder.add_edge("generate_queries", "search_web")
+# section_builder.add_edge("search_web", "write_section")
 
 # Politician research sub-graph
 politician_research = StateGraph(PoliticianResearchState, output=PoliticianResearchOutput)

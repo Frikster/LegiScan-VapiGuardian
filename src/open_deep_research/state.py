@@ -96,8 +96,8 @@ class CallScript(BaseModel):
     politician: str = Field(
         description="Name of the politician this script is for.",
     )
-    introduction: str = Field(
-        description="Introduction for the call that mentions the legislation.",
+    first_message: str = Field(
+        description="First message the assistant will say when the call connects. Must be brief.",
     )
     key_points: List[str] = Field(
         description="Key talking points tailored to the politician's background.",
@@ -105,8 +105,8 @@ class CallScript(BaseModel):
     ask: str = Field(
         description="The specific request or action being asked of the politician.",
     )
-    closing: str = Field(
-        description="Closing statement for the call.",
+    end_call_message: str = Field(
+        description="Message the assistant will say before ending the call.",
     )
     full_script: str = Field(
         description="Complete call script combining all elements.",
@@ -145,6 +145,10 @@ class VapiCallConfig(BaseModel):
     )
     system_prompt: str = Field(
         description="System prompt for the assistant to use during the call.",
+    )
+    enhanced_system_prompt: str = Field(
+        description="Enhanced system prompt that is more conversational and concise.",
+        default=None
     )
     assistant_name: str = Field(
         description="Name for the assistant to use when referring to itself.",

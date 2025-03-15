@@ -1023,22 +1023,25 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
         "name": name,
         "model": {
             "provider": "openai",
-            "model": "gpt-4o",
+            "model": "gpt-4o-mini",
             "temperature": 0.7,
             "messages": [
                 {
                     "role": "system",
                     "content": system_prompt
                 }
-            ]
+            ],
+            "emotionRecognitionEnabled": True,
+            "maxTokens": 100
         },
         "voice": {
             "provider": "playht",
-            "voiceId": "jennifer"
+            "voiceId": "jennifer",
+            "model": "PlayDialog"
         },
         "transcriber": {
             "provider": "deepgram",
-            "model": "nova-2",
+            "model": "nova-3",
             "language": "en"
         }
     }
@@ -1110,6 +1113,11 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
             payload["model"] = {}
         
         payload["model"]["toolIds"] = [tool_id]
+        payload["model"]["tools"] = [
+            {
+                "type": "endCall"
+            }
+        ]
     
     # Pretty print the payload for easier debugging
     import json

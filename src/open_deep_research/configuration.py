@@ -42,13 +42,13 @@ class VapiProvider(Enum):
 class Configuration:
     """The configurable fields for the application."""
     report_structure: str = DEFAULT_REPORT_STRUCTURE # Defaults to the default report structure
-    number_of_queries: int = 2 # Number of search queries to generate per iteration
+    number_of_queries: int = 10 # Number of search queries to generate per iteration
     max_search_depth: int = 2 # Maximum number of reflection + search iterations
     planner_provider: PlannerProvider = PlannerProvider.OPENAI  # Defaults to Anthropic as provider
     planner_model: str = "gpt-4o" # Defaults to claude-3-7-sonnet-latest
     writer_provider: WriterProvider = WriterProvider.OPENAI # Defaults to Anthropic as provider
     writer_model: str = "gpt-4o-mini" # Defaults to claude-3-5-sonnet-latest
-    search_api: SearchAPI = SearchAPI.TAVILY # Default to TAVILY
+    search_api: SearchAPI = SearchAPI.PERPLEXITY # Default to TAVILY
     search_api_config: Optional[Dict[str, Any]] = None 
 
     # New fields for legislation analysis
