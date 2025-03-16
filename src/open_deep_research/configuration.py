@@ -35,9 +35,6 @@ class WriterProvider(Enum):
     OPENAI = "openai"
     GROQ = "groq"
 
-class VapiProvider(Enum):
-    VAPI = "vapi"
-
 @dataclass(kw_only=True)
 class Configuration:
     """The configurable fields for the application."""
@@ -53,13 +50,9 @@ class Configuration:
 
     # New fields for legislation analysis
     number_of_politicians: int = 3  # Number of politicians to research
-    max_search_depth: int = 2  # Maximum number of reflection + search iterations
     
     # Vapi configuration
-    vapi_provider: VapiProvider = VapiProvider.VAPI
     vapi_phone_id: Optional[str] = os.getenv("VAPI_PHONE_ID")
-    vapi_assistant_id: Optional[str] = None  # Optional preset assistant ID
-    vapi_from_number: Optional[str] = None  # Optional preset from number
     vapi_to_number: Optional[str] = None  # Optional preset to number (for testing)
     vapi_assistant_name: str = "Jennifer"
     vapi_organization_name: str = "The American Century Institute"

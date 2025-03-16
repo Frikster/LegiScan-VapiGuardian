@@ -1032,7 +1032,7 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
                 }
             ],
             "emotionRecognitionEnabled": True,
-            "maxTokens": 100
+            "maxTokens": 100,
         },
         "voice": {
             "provider": "playht",
@@ -1043,7 +1043,10 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
             "provider": "deepgram",
             "model": "nova-3",
             "language": "en"
-        }
+        },
+        "messagePlan": {
+            "idleMessages": ["Hello?", "Are you still there?", "Can you hear me?"]
+        },
     }
     
     # Add optional parameters if provided
@@ -1116,8 +1119,16 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
         payload["model"]["tools"] = [
             {
                 "type": "endCall"
+            },
+            {
+                "type": "voicemail"
+            },
+            {
+                "type": "transferCall"
             }
         ]
+        # Add knowledge base ID directly under model config
+        # payload["model"]["knowledgeBaseId"] = <from env var>
     
     # Pretty print the payload for easier debugging
     import json
@@ -1155,6 +1166,11 @@ def make_vapi_call(assistant_id: str, phone_number_id: str, customer_number: str
             "name": "Dirk"
         }
     }
+    
+    # Pretty print the payload for easier debugging
+    import json
+    print("Call Creation Payload:")
+    print(json.dumps(payload, indent=2))
     
     response = requests.post(url, json=payload, headers=headers)
     response.raise_for_status()

@@ -173,12 +173,12 @@ def human_feedback(state: ReportState, config: RunnableConfig) -> Command[Litera
     # Get feedback on the report plan from interrupt
     interrupt_message = f"""Please provide feedback on the following report plan. 
                         \n\n{sections_str}\n\n
-                        \nDoes the report plan meet your needs? Pass 'true' to approve the report plan or provide feedback to regenerate the report plan:"""
+                        \nDoes the report plan meet your needs? Pass "True" to approve the report plan or provide feedback to regenerate the report plan:"""
     
     feedback = interrupt(interrupt_message)
 
     # If the user approves the report plan, kick off section writing
-    if isinstance(feedback, bool) and feedback is True:
+    if isinstance(feedback, bool) and feedback is True or feedback=="True" or feedback=="true":
         # Treat this as approve and kick off section writing
         return Command(goto=[
             Send("build_section_with_web_research", {"topic": topic, "section": s, "search_iterations": 0}) 
@@ -393,6 +393,41 @@ def compile_final_report(state: ReportState):
 
     return {"final_report": all_sections}
 
+
+def add_report_to_trieve(state: ReportState):
+    """Add the final report to Trieve for future retrieval.
+    
+    Args:
+        state: Current state containing the final report
+        
+    Returns:
+        dict: Empty dict as the function is the final node
+    """
+    import requests
+    import os
+    from datetime import datetime
+    
+    final_report = state["final_report"]
+    topic = state["topic"]
+    
+    # Configure Trieve API request
+    url = "https://api.trieve.ai/api/chunk"
+    headers = {
+        "Authorization": os.getenv("TRIEVE_API_KEY"),
+        "Content-Type": "application/json",
+        "TR-Dataset": os.getenv("TRIEVE_DATASET_ID")
+    }
+     
+    payload = {
+        "chunk_html": final_report,
+    }
+    
+    # Make the API request
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    
+    print("Successfully added report to Trieve")
+    return {}  # Return empty dict as this is the final node
 
 # New nodes for legislation analysis workflow
 def analyze_legislation(state: LegislationState, config: RunnableConfig):
@@ -694,7 +729,6 @@ IMPROVED SYSTEM PROMPT:"""
             enhanced_prompt_response = llm.invoke([
                 HumanMessage(content=enhancement_prompt)
             ])
-            print("enhanced_prompt_response", enhanced_prompt_response)
             
             # Extract the enhanced system prompt
             enhanced_system_prompt = enhanced_prompt_response.content
@@ -702,7 +736,7 @@ IMPROVED SYSTEM PROMPT:"""
             # Create a new Vapi assistant for this call with the query tool
             assistant_id = create_vapi_assistant(
                 name=f"{assistant_name} - {politician.name}",
-                system_prompt=enhanced_system_prompt,
+                system_prompt=system_prompt,
                 first_message=script.first_message,
                 end_call_message=script.end_call_message,
                 analysis_plan=analysis_plan,
@@ -804,16 +838,16 @@ def make_calls(state: LegislationState, config: RunnableConfig):
 
 # Report section sub-graph -- 
 
-# # Add nodes 
-# section_builder = StateGraph(SectionState, output=SectionOutputState)
-# section_builder.add_node("generate_queries", generate_queries)
-# section_builder.add_node("search_web", search_web)
-# section_builder.add_node("write_section", write_section)
+# Add nodes 
+section_builder = StateGraph(SectionState, output=SectionOutputState)
+section_builder.add_node("generate_queries", generate_queries)
+section_builder.add_node("search_web", search_web)
+section_builder.add_node("write_section", write_section)
 
-# # Add edges
-# section_builder.add_edge(START, "generate_queries")
-# section_builder.add_edge("generate_queries", "search_web")
-# section_builder.add_edge("search_web", "write_section")
+# Add edges
+section_builder.add_edge(START, "generate_queries")
+section_builder.add_edge("generate_queries", "search_web")
+section_builder.add_edge("search_web", "write_section")
 
 # Politician research sub-graph
 politician_research = StateGraph(PoliticianResearchState, output=PoliticianResearchOutput)
@@ -833,21 +867,22 @@ politician_research_graph = politician_research.compile()
 # Outer graph for report generation -- 
 
 # Add nodes
-# builder = StateGraph(ReportState, input=ReportStateInput, output=ReportStateOutput, config_schema=Configuration)
-# builder.add_node("generate_report_plan", generate_report_plan)
-# builder.add_node("human_feedback", human_feedback)
-# builder.add_node("build_section_with_web_research", section_builder.compile())
-# builder.add_node("gather_completed_sections", gather_completed_sections)
-# builder.add_node("write_final_sections", write_final_sections)
-# builder.add_node("compile_final_report", compile_final_report)
+builder = StateGraph(ReportState, input=ReportStateInput, output=ReportStateOutput, config_schema=Configuration)
+builder.add_node("generate_report_plan", generate_report_plan)
+builder.add_node("human_feedback", human_feedback)
+builder.add_node("build_section_with_web_research", section_builder.compile())
+builder.add_node("gather_completed_sections", gather_completed_sections)
+builder.add_node("write_final_sections", write_final_sections)
+builder.add_node("compile_final_report", compile_final_report)
+builder.add_node("add_report_to_trieve", add_report_to_trieve)
 
-# # Add edges
-# builder.add_edge(START, "generate_report_plan")
-# builder.add_edge("generate_report_plan", "human_feedback")
-# builder.add_edge("build_section_with_web_research", "gather_completed_sections")
-# builder.add_conditional_edges("gather_completed_sections", initiate_final_section_writing, ["write_final_sections"])
-# builder.add_edge("write_final_sections", "compile_final_report")
-# builder.add_edge("compile_final_report", END)
+# Add edges
+builder.add_edge(START, "generate_report_plan")
+builder.add_edge("generate_report_plan", "human_feedback")
+builder.add_edge("build_section_with_web_research", "gather_completed_sections")
+builder.add_conditional_edges("gather_completed_sections", initiate_final_section_writing, ["write_final_sections"])
+builder.add_edge("write_final_sections", "compile_final_report")
+builder.add_edge("compile_final_report", "add_report_to_trieve")
 
 # Legislation analysis graph
 legislation_analysis = StateGraph(LegislationState, input=LegislationStateInput, output=LegislationStateOutput, config_schema=Configuration)
@@ -869,7 +904,7 @@ legislation_analysis.add_edge("call_scripts_human_feedback", "make_calls")
 legislation_analysis.add_edge("make_calls", END)
 
 # Compile the graphs
-# report_graph = builder.compile()
+report_graph = builder.compile()
 legislation_graph = legislation_analysis.compile()
 
 # Initialize caching and persistence

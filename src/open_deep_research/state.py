@@ -97,7 +97,7 @@ class CallScript(BaseModel):
         description="Name of the politician this script is for.",
     )
     first_message: str = Field(
-        description="First message the assistant will say when the call connects. Must be brief.",
+        description="First message the assistant will say when the call connects. Must be no more than 5 words and solely and ask if they have reached the right contact.",
     )
     key_points: List[str] = Field(
         description="Key talking points tailored to the politician's background.",
@@ -106,7 +106,7 @@ class CallScript(BaseModel):
         description="The specific request or action being asked of the politician.",
     )
     end_call_message: str = Field(
-        description="Message the assistant will say before ending the call.",
+        description="Message the assistant will say before ending the call. Must be no more than 5 words.",
     )
     full_script: str = Field(
         description="Complete call script combining all elements.",
