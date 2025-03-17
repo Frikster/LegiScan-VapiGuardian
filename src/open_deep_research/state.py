@@ -1,8 +1,9 @@
 import operator
-import os
 from typing import Annotated, List, Literal, Optional, TypedDict
 
 from pydantic import BaseModel, Field
+
+# Report
 
 
 class Section(BaseModel):
@@ -15,58 +16,95 @@ class Section(BaseModel):
     research: bool = Field(
         description="Whether to perform web research for this section of the report."
     )
-    content: str = Field(
-        description="The content of the section."
-    )   
+    content: str = Field(description="The content of the section.")
+
 
 class Sections(BaseModel):
     sections: List[Section] = Field(
         description="Sections of the report.",
     )
 
+
 class SearchQuery(BaseModel):
     search_query: str = Field(None, description="Query for web search.")
+
 
 class Queries(BaseModel):
     queries: List[SearchQuery] = Field(
         description="List of search queries.",
     )
 
+
 class Feedback(BaseModel):
-    grade: Literal["pass","fail"] = Field(
+    grade: Literal["pass", "fail"] = Field(
         description="Evaluation result indicating whether the response meets requirements ('pass') or needs revision ('fail')."
     )
     follow_up_queries: List[SearchQuery] = Field(
         description="List of follow-up search queries.",
     )
 
+
 class ReportStateInput(TypedDict):
-    topic: str # Report topic
-    
+    topic: str  # Report topic
+    additional_context: Optional[dict] = None
+
+
+class PoliticianReport(BaseModel):
+    """Report generated for a specific politician."""
+
+    politician_name: str = Field(description="Name of the politician")
+    topic: str = Field(description="Topic of the report")
+    final_report: str = Field(description="Final report content")
+    tldr_points: List[str] = Field(
+        description="TLDR bullet points", default_factory=list
+    )
+
+
 class ReportStateOutput(TypedDict):
-    final_report: str # Final report
+    final_reports: list[PoliticianReport]
+
 
 class ReportState(TypedDict):
-    topic: str # Report topic    
-    feedback_on_report_plan: str # Feedback on the report plan
-    sections: list[Section] # List of report sections 
-    completed_sections: Annotated[list, operator.add] # Send() API key
-    report_sections_from_research: str # String of any completed sections from research to write final sections
-    final_report: str # Final report
+    topic: Annotated[str, lambda x, y: x]  # Report topic   TODO:
+    additional_context: Optional[dict] = None
+    feedback_on_report_plan: str  # Feedback on the report plan
+    sections: list[Section]  # List of report sections
+    completed_sections: Annotated[list, operator.add]  # Send() API key
+    report_sections_from_research: Annotated[
+        str, lambda x, y: x
+    ]  # String of any completed sections from research to write final sections
+    final_reports: list[PoliticianReport]
+
 
 class SectionState(TypedDict):
-    topic: str # Report topic
-    section: Section # Report section  
-    search_iterations: int # Number of search iterations done
-    search_queries: list[SearchQuery] # List of search queries
-    source_str: str # String of formatted source content from web search
-    report_sections_from_research: str # String of any completed sections from research to write final sections
-    completed_sections: list[Section] # Final key we duplicate in outer state for Send() API
+    topic: Annotated[str, lambda x, y: x]  # Report topic
+    # section: Section # Report section
+    section: Annotated[Section, lambda x, y: x]
+    search_iterations: Annotated[
+        int, lambda x, y: x
+    ]  # Number of search iterations done
+    search_queries: Annotated[
+        list[SearchQuery], lambda x, y: x
+    ]  # List of search queries
+    source_str: Annotated[
+        str, lambda x, y: x
+    ]  # String of formatted source content from web search
+    report_sections_from_research: Annotated[
+        str, lambda x, y: x
+    ]  # String of any completed sections from research to write final sections
+    completed_sections: list[
+        Section
+    ]  # Final key we duplicate in outer state for Send() API
+
 
 class SectionOutputState(TypedDict):
-    completed_sections: list[Section] # Final key we duplicate in outer state for Send() API
+    completed_sections: list[
+        Section
+    ]  # Final key we duplicate in outer state for Send() API
 
-#######
+
+# Legislation
+
 
 class Politician(BaseModel):
     name: str = Field(
@@ -75,67 +113,44 @@ class Politician(BaseModel):
     position: str = Field(
         description="Current political position/office.",
     )
-    contact_info: str = Field(
-        description="Contact information including phone number if available.",
-    )
     background: str = Field(
         description="Political background and relevant history.",
     )
-    stance_on_animals: str = Field(
-        description="Known positions on animal welfare issues.",
+    stance_on_issue: str = Field(
+        description="Known positions on input issue.",
     )
     financial_backing: str = Field(
         description="Information about financial supporters and donors.",
     )
     phone_number: Optional[str] = Field(
-        description="Phone number to call, if available.",
-        default=None
+        description="Phone number to call, if available.", default=None
     )
 
-class CallScript(BaseModel):
-    politician: str = Field(
-        description="Name of the politician this script is for.",
-    )
-    first_message: str = Field(
-        description="First message the assistant will say when the call connects. Must be no more than 5 words and solely and ask if they have reached the right contact.",
-    )
-    key_points: List[str] = Field(
-        description="Key talking points tailored to the politician's background.",
-    )
-    ask: str = Field(
-        description="The specific request or action being asked of the politician.",
-    )
-    end_call_message: str = Field(
-        description="Message the assistant will say before ending the call. Must be no more than 5 words.",
-    )
-    full_script: str = Field(
-        description="Complete call script combining all elements.",
-    )
 
 class LegislationAnalysis(BaseModel):
     summary: str = Field(
         description="Summary of the legislation's content and implications.",
     )
-    animal_welfare_impact: str = Field(
-        description="Analysis of how the legislation affects animal welfare.",
+    issue_impact: str = Field(
+        description="Analysis of how the legislation affects issue of concern.",
+    )
+    will_have_negative_impact: bool = Field(
+        description="Whether the legislation will negatively affect the issue of concern.",
     )
     key_politicians: List[Politician] = Field(
-        description="List of politicians relevant to this legislation.",
-    )
-    recommended_actions: List[str] = Field(
-        description="Recommended advocacy actions based on the analysis.",
+        description="List of key politicians that support this legislation.",
     )
 
+
 class VapiCallConfig(BaseModel):
-    assistant_id: str = Field(
-        description="ID of the Vapi assistant to use for the call.",
+    assistant_id: Optional[str] = Field(
+        description="ID of the Vapi assistant to use for the call.", default=None
     )
     phone_number_id: str = Field(
         description="ID of the phone number to call from.",
     )
     customer_number: str = Field(
         description="Phone number to call.",
-        default=os.getenv('TEST_NUMBER'),
     )
     customer_name: str = Field(
         description="Name of the customer being called.",
@@ -146,50 +161,56 @@ class VapiCallConfig(BaseModel):
     system_prompt: str = Field(
         description="System prompt for the assistant to use during the call.",
     )
-    enhanced_system_prompt: str = Field(
-        description="Enhanced system prompt that is more conversational and concise.",
-        default=None
-    )
     assistant_name: str = Field(
         description="Name for the assistant to use when referring to itself.",
-        default="Jennifer"
     )
     organization_name: str = Field(
         description="Name of the organization the assistant represents.",
-        default="The American Century Institute"
-    )
-    end_call_message: str = Field(
-        description="Message the assistant will say before ending the call.",
-        default="Thank you for your time. Goodbye!"
     )
     analysis_plan: Optional[dict] = Field(
         description="Configuration for call analysis and outcome reporting.",
-        default=None
     )
 
-class LegislationStateInput(TypedDict):
-    legislation_path: str  # Path to legislation PDF file
-    
+
 class LegislationStateOutput(TypedDict):
     analysis: LegislationAnalysis  # Analysis of the legislation
-    call_scripts: List[CallScript]  # Generated call scripts
     vapi_configs: List[VapiCallConfig]  # Vapi call configurations
+
+
+class VapiTools(BaseModel):
+    """Tools created in Vapi for the assistant."""
+
+    file_id: str = Field(description="ID of the uploaded legislation file")
+    tool_id: str = Field(description="ID of the created query tool")
+
 
 class LegislationState(TypedDict):
     legislation_path: str  # Input legislation path
+    issue_of_concern: str
     legislation_text: str
     analysis: LegislationAnalysis  # Analysis of the legislation
     politicians: Annotated[list[Politician], operator.add]  # List of politicians
-    call_scripts: Annotated[list[CallScript], operator.add]  # Generated call scripts
-    vapi_configs: Annotated[list[VapiCallConfig], operator.add]  # Vapi call configurations
+    final_reports: Annotated[
+        list[PoliticianReport], operator.add
+    ]  # Reports for each politician
+    vapi_tools: VapiTools  # Tools created in Vapi
+    vapi_configs: Annotated[
+        list[VapiCallConfig], operator.add
+    ]  # Vapi call configurations
     approved_calls: list[VapiCallConfig]  # Calls approved by the user
 
-class PoliticianResearchState(TypedDict):
-    politician_name: str  # Name of the politician to research
-    legislation_text: str  # Original legislation text for context
-    search_queries: list[SearchQuery]  # Search queries for research
-    source_str: str  # String of formatted source content from web search
-    politician: Politician  # Politician data structure to be populated
 
-class PoliticianResearchOutput(TypedDict):
-    politicians: Annotated[list[Politician], operator.add]  # List of researched politicians
+class LegislationStateInput(TypedDict):
+    legislation_path: str  # Path to legislation PDF file
+    issue_of_concern: str  # Input issue that the app user is concerned about
+
+
+# class PoliticianResearchState(TypedDict):
+#     politician_name: str  # Name of the politician to research
+#     legislation_text: str  # Original legislation text for context
+#     search_queries: list[SearchQuery]  # Search queries for research
+#     source_str: str  # String of formatted source content from web search
+#     politician: Politician  # Politician data structure to be populated
+
+# class PoliticianResearchOutput(TypedDict):
+#     politicians: Annotated[list[Politician], operator.add]  # List of researched politicians
