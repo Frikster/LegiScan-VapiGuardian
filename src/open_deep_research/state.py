@@ -106,26 +106,6 @@ class SectionOutputState(TypedDict):
 # Legislation
 
 
-class Politician(BaseModel):
-    name: str = Field(
-        description="Name of the politician.",
-    )
-    position: str = Field(
-        description="Current political position/office.",
-    )
-    background: str = Field(
-        description="Political background and relevant history.",
-    )
-    stance_on_issue: str = Field(
-        description="Known positions on input issue.",
-    )
-    financial_backing: str = Field(
-        description="Information about financial supporters and donors.",
-    )
-    phone_number: Optional[str] = Field(
-        description="Phone number to call, if available.", default=None
-    )
-
 
 class LegislationAnalysis(BaseModel):
     summary: str = Field(
@@ -137,7 +117,7 @@ class LegislationAnalysis(BaseModel):
     will_have_negative_impact: bool = Field(
         description="Whether the legislation will negatively affect the issue of concern.",
     )
-    key_politicians: List[Politician] = Field(
+    key_politician_names: List[str] = Field(
         description="List of key politicians that support this legislation.",
     )
 
@@ -183,6 +163,25 @@ class VapiTools(BaseModel):
     file_id: str = Field(description="ID of the uploaded legislation file")
     tool_id: str = Field(description="ID of the created query tool")
 
+class Politician(BaseModel):
+    name: str = Field(
+        description="Name of the politician.",
+    )
+    position: str = Field(
+        description="Current political position/office.",
+    )
+    background: str = Field(
+        description="Political background and relevant history.",
+    )
+    stance_on_issue: str = Field(
+        description="Known positions on input issue.",
+    )
+    financial_backing: str = Field(
+        description="Information about financial supporters and donors.",
+    )
+    phone_number: Optional[str] = Field(
+        description="Phone number to call, if available.", default=None
+    )
 
 class LegislationState(TypedDict):
     legislation_path: str  # Input legislation path
@@ -205,12 +204,12 @@ class LegislationStateInput(TypedDict):
     issue_of_concern: str  # Input issue that the app user is concerned about
 
 
-# class PoliticianResearchState(TypedDict):
-#     politician_name: str  # Name of the politician to research
-#     legislation_text: str  # Original legislation text for context
-#     search_queries: list[SearchQuery]  # Search queries for research
-#     source_str: str  # String of formatted source content from web search
-#     politician: Politician  # Politician data structure to be populated
+class PoliticianResearchState(TypedDict):
+    politician_name: str  # Name of the politician to research
+    legislation_text: str  # Original legislation text for context
+    search_queries: list[SearchQuery]  # Search queries for research
+    source_str: str  # String of formatted source content from web search
+    politician: Politician  # Politician data structure to be populated
 
-# class PoliticianResearchOutput(TypedDict):
-#     politicians: Annotated[list[Politician], operator.add]  # List of researched politicians
+class PoliticianResearchOutput(TypedDict):
+    politicians: Annotated[list[Politician], operator.add]  # List of researched politicians

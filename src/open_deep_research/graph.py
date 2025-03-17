@@ -23,6 +23,8 @@ from open_deep_research.prompts import (
     section_writer_instructions,
     tldr_prompt,
     vapi_system_prompt_template,
+    politician_query_writer_instructions,
+    politician_research_instructions
 )
 from open_deep_research.state import (
     Feedback,
@@ -40,6 +42,9 @@ from open_deep_research.state import (
     SectionState,
     VapiCallConfig,
     VapiTools,
+    PoliticianResearchState,
+    PoliticianResearchOutput,
+    Politician
 )
 from open_deep_research.utils import (
     arxiv_search_async,
@@ -608,8 +613,120 @@ def analyze_legislation(state: LegislationState, config: RunnableConfig):
     return {
         "analysis": analysis,
         "legislation_text": legislation_text,
-        "politicians": analysis.key_politicians,
+        # "politicians": analysis.key_politicians,
     }
+
+def identify_politicians_to_research(state: LegislationState, config: RunnableConfig) -> Command[Literal["research_politician"]]:
+    """Identify politicians to research and kick off parallel research."""
+    # Get analysis
+    analysis = state["analysis"]
+    legislation_text = state["legislation_text"]
+     
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    max_politicians = configurable.number_of_politicians
+    
+    # Limit to the specified number of politicians
+    politicians_to_research_names = analysis.key_politician_names[:max_politicians]
+     
+    # Kick off politician research in parallel
+    return Command(goto=[
+        Send("research_politician", {
+             "politician_name": name,
+             "legislation_text": legislation_text
+        }) for name in politicians_to_research_names
+    ])
+ 
+def generate_politician_queries(state: PoliticianResearchState, config: RunnableConfig):
+    """Generate search queries for researching a politician."""
+    # Get state
+    politician_name = state["politician_name"]
+    legislation_text = state["legislation_text"]
+
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    number_of_queries = configurable.number_of_queries
+
+    # Set up LLM
+    writer_provider = get_config_value(configurable.writer_provider)
+    writer_model = get_config_value(configurable.writer_model)
+    llm = init_chat_model(model=writer_model, model_provider=writer_provider)
+    structured_llm = llm.with_structured_output(Queries)
+
+    # Generate queries
+    system_instructions = politician_query_writer_instructions.format(
+        politician_name=politician_name,
+        legislation_context=legislation_text,
+        number_of_queries=number_of_queries
+    )
+
+    # TODO: Improve to get multiple variants of arguments based on different conversation paths
+    queries = structured_llm.invoke([
+        SystemMessage(content=system_instructions),
+        HumanMessage(content="Generate search queries to research this politician.")
+    ])
+
+    return {"search_queries": queries.queries}
+
+async def search_politician_info(state: PoliticianResearchState, config: RunnableConfig):
+    """Search for information about the politician."""
+    # Get state
+    search_queries = state["search_queries"]
+
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    search_api = get_config_value(configurable.search_api)
+
+    # Web search
+    query_list = [query.search_query for query in search_queries]
+    # TODO
+    # query_list = [query.search_query for query in results.queries]
+    # params_to_pass = get_search_params(search_api, search_api_config)  # Filter parameters
+
+    # Search the web
+    if search_api == "tavily":
+        search_results = await tavily_search_async(query_list)
+        source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
+    elif search_api == "perplexity":
+        search_results = perplexity_search(query_list)
+        source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
+    elif search_api == "exa":
+        search_results = await exa_search(query_list)
+        source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
+    else:
+        raise ValueError(f"Unsupported search API: {search_api}")
+
+    return {"source_str": source_str}
+
+def research_politician(state: PoliticianResearchState, config: RunnableConfig):
+    """Research a politician based on search results."""
+    # Get state
+    politician_name = state["politician_name"]
+    legislation_text = state["legislation_text"]
+    source_str = state["source_str"]
+
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+
+    # Set up LLM
+    writer_provider = get_config_value(configurable.writer_provider)
+    writer_model = get_config_value(configurable.writer_model)
+    llm = init_chat_model(model=writer_model, model_provider=writer_provider)
+    structured_llm = llm.with_structured_output(Politician)
+
+    # Research politician
+    system_instructions = politician_research_instructions.format(
+        politician_name=politician_name,
+        legislation_context=legislation_text,
+        context=source_str
+    )
+
+    politician = structured_llm.invoke([
+        SystemMessage(content=system_instructions),
+        HumanMessage(content="Research this politician based on the provided sources.")
+    ])
+
+    return {"politicians": [politician]}  # Return as a list for proper aggregation
 
 
 def initiate_politician_reports(
@@ -618,13 +735,14 @@ def initiate_politician_reports(
     """Identify politicians to research and process them sequentially."""
     analysis = state["analysis"]
     legislation_text = state["legislation_text"]
+    politicians = state["politicians"]
 
     # Get configuration
     configurable = Configuration.from_runnable_config(config)
     max_politicians = configurable.number_of_politicians
 
     # Limit to the specified number of politicians
-    politicians_to_research = analysis.key_politicians[:max_politicians]
+    politicians_to_research = politicians[:max_politicians]
 
     # Spawn a report generation task for each politician
     return Command(
@@ -632,7 +750,7 @@ def initiate_politician_reports(
             Send(
                 "generate_report",
                 {
-                    "topic": f"Counter-arguments to the legislation that is tailored to {politician.name}'s political stance/values, financial backing, social media posts etc that is most likely to convince {politician.name} to withdraw their support for the legislation",
+                    "topic": f"A report on counter-arguments to the legislation that is likely to resonate with {politician.name}",
                     "additional_context": {
                         "politician": politician,
                         "legislation_text": legislation_text,
@@ -643,42 +761,6 @@ def initiate_politician_reports(
             for politician in politicians_to_research
         ]
     )
-
-    # Store the list of politicians to process
-    # return {
-    #     "politicians_to_process": politicians_to_research,
-    #     "current_politician_index": 0
-    # }
-
-
-# def process_next_politician(state: LegislationState, config: RunnableConfig) -> Command[Literal["generate_report", END]]:
-#     """Process the next politician in the list."""
-#     politicians_to_process = state["politicians_to_process"]
-#     current_index = state["current_politician_index"]
-
-#     # Check if we've processed all politicians
-#     if current_index >= len(politicians_to_process):
-#         return Command(goto=END)
-
-#     # Get the current politician
-#     politician = politicians_to_process[current_index]
-#     legislation_text = state["legislation_text"]
-#     analysis = state["analysis"]
-
-#     # Update the index for the next politician
-#     next_index = current_index + 1
-
-#     # Generate a report for the current politician
-#     return Command(goto="generate_report", update={
-#         "topic": f"Counter-arguments to the legislation that is tailored to {politician.name}'s political stance/values, financial backing, social media posts etc that is most likely to convince {politician.name} to withdraw their support for the legislation",
-#         "additional_context": {
-#             "politician": politician,
-#             "legislation_text": legislation_text,
-#             "analysis": analysis
-#         },
-#         "current_politician_index": next_index
-#     })
-
 
 def add_report_to_trieve(state: ReportState):
     """Add the final report to Trieve for future retrieval.
@@ -767,97 +849,6 @@ def generate_tldr_points(state: ReportState, config: RunnableConfig):
 
 
 # Replaced with full research report code. Left as comments in case useful before demo
-
-# def generate_politician_queries(state: PoliticianResearchState, config: RunnableConfig):
-#     """Generate search queries for researching a politician."""
-#     # Get state
-#     politician_name = state["politician_name"]
-#     legislation_text = state["legislation_text"]
-
-#     # Get configuration
-#     configurable = Configuration.from_runnable_config(config)
-#     number_of_queries = configurable.number_of_queries
-
-#     # Set up LLM
-#     writer_provider = get_config_value(configurable.writer_provider)
-#     writer_model = get_config_value(configurable.writer_model)
-#     llm = init_chat_model(model=writer_model, model_provider=writer_provider)
-#     structured_llm = llm.with_structured_output(Queries)
-
-#     # Generate queries
-#     system_instructions = politician_query_writer_instructions.format(
-#         politician_name=politician_name,
-#         legislation_context=legislation_text,
-#         number_of_queries=number_of_queries
-#     )
-
-#     # TODO: Improve to get multiple variants of arguments based on different conversation paths
-#     queries = structured_llm.invoke([
-#         SystemMessage(content=system_instructions),
-#         HumanMessage(content="Generate search queries to research this politician.")
-#     ])
-
-#     return {"search_queries": queries.queries}
-
-# async def search_politician_info(state: PoliticianResearchState, config: RunnableConfig):
-#     """Search for information about the politician."""
-#     # Get state
-#     search_queries = state["search_queries"]
-
-#     # Get configuration
-#     configurable = Configuration.from_runnable_config(config)
-#     search_api = get_config_value(configurable.search_api)
-
-#     # Web search
-#     query_list = [query.search_query for query in search_queries]
-#     # TODO
-#     # query_list = [query.search_query for query in results.queries]
-#     # params_to_pass = get_search_params(search_api, search_api_config)  # Filter parameters
-
-#     # Search the web
-#     if search_api == "tavily":
-#         search_results = await tavily_search_async(query_list)
-#         source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
-#     elif search_api == "perplexity":
-#         search_results = perplexity_search(query_list)
-#         source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
-#     elif search_api == "exa":
-#         search_results = await exa_search(query_list)
-#         source_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=5000)
-#     else:
-#         raise ValueError(f"Unsupported search API: {search_api}")
-
-#     return {"source_str": source_str}
-
-# def research_politician(state: PoliticianResearchState, config: RunnableConfig):
-#     """Research a politician based on search results."""
-#     # Get state
-#     politician_name = state["politician_name"]
-#     legislation_text = state["legislation_text"]
-#     source_str = state["source_str"]
-
-#     # Get configuration
-#     configurable = Configuration.from_runnable_config(config)
-
-#     # Set up LLM
-#     writer_provider = get_config_value(configurable.writer_provider)
-#     writer_model = get_config_value(configurable.writer_model)
-#     llm = init_chat_model(model=writer_model, model_provider=writer_provider)
-#     structured_llm = llm.with_structured_output(Politician)
-
-#     # Research politician
-#     system_instructions = politician_research_instructions.format(
-#         politician_name=politician_name,
-#         legislation_context=legislation_text,
-#         context=source_str
-#     )
-
-#     politician = structured_llm.invoke([
-#         SystemMessage(content=system_instructions),
-#         HumanMessage(content="Research this politician based on the provided sources.")
-#     ])
-
-#     return {"politicians": [politician]}  # Return as a list for proper aggregation
 
 # def generate_call_scripts(state: LegislationState, config: RunnableConfig):
 #     """Generate call scripts for each politician and enhance them to be more conversational and concise."""
@@ -1176,20 +1167,20 @@ section_builder.add_edge("search_web", "write_section")
 
 # Replaced with full research report code. Left as comments in case useful before demo
 
-# # Politician research sub-graph
-# politician_research = StateGraph(PoliticianResearchState, output=PoliticianResearchOutput)
-# politician_research.add_node("generate_politician_queries", generate_politician_queries)
-# politician_research.add_node("search_politician_info", search_politician_info)
-# politician_research.add_node("research_politician", research_politician)
+# Politician research sub-graph
+politician_research = StateGraph(PoliticianResearchState, output=PoliticianResearchOutput)
+politician_research.add_node("generate_politician_queries", generate_politician_queries)
+politician_research.add_node("search_politician_info", search_politician_info)
+politician_research.add_node("research_politician", research_politician)
 
-# # Add edges to the politician research sub-graph
-# politician_research.add_edge(START, "generate_politician_queries")
-# politician_research.add_edge("generate_politician_queries", "search_politician_info")
-# politician_research.add_edge("search_politician_info", "research_politician")
-# politician_research.add_edge("research_politician", END)
+# Add edges to the politician research sub-graph
+politician_research.add_edge(START, "generate_politician_queries")
+politician_research.add_edge("generate_politician_queries", "search_politician_info")
+politician_research.add_edge("search_politician_info", "research_politician")
+politician_research.add_edge("research_politician", END)
 
-# # Compile the politician research sub-graph
-# politician_research_graph = politician_research.compile()
+# Compile the politician research sub-graph
+politician_research_graph = politician_research.compile()
 
 # Inner graph for report generation --
 
@@ -1232,6 +1223,8 @@ legislation_analysis = StateGraph(
     config_schema=Configuration,
 )
 legislation_analysis.add_node("analyze_legislation", analyze_legislation)
+legislation_analysis.add_node("identify_politicians_to_research", identify_politicians_to_research)
+legislation_analysis.add_node("research_politician", politician_research_graph)
 legislation_analysis.add_node(
     "initiate_politician_reports", initiate_politician_reports
 )
@@ -1250,7 +1243,9 @@ legislation_analysis.add_node("make_calls", make_calls)
 
 # Add edges to the legislation analysis graph
 legislation_analysis.add_edge(START, "analyze_legislation")
-legislation_analysis.add_edge("analyze_legislation", "initiate_politician_reports")
+# legislation_analysis.add_edge("analyze_legislation", "initiate_politician_reports")
+legislation_analysis.add_edge("analyze_legislation", "identify_politicians_to_research")
+legislation_analysis.add_edge("research_politician", "initiate_politician_reports")
 # legislation_analysis.add_edge("initiate_politician_reports", "generate_report")
 # legislation_analysis.add_edge("analyze_legislation", politician_report_graph)
 legislation_analysis.add_edge("generate_report", "create_vapi_tools")
