@@ -405,6 +405,7 @@ Only retrieve from your Knowledge Base if you are asked more specific informatio
 - If constituent is busy: Offer to call back at a more convenient time
 - If constituent is opposed: Thank them for their time and end the call politely
 - If constituent asks for more information: Have 2-3 key facts ready about the legislation
+- Always, always, before ending the call under any circumstance, ask and collect email_id from the customer and generate appropriate email_content that needs to be sent over to process-email-info.
 </Response Handling>
 
 <Conversation Guardrails>
