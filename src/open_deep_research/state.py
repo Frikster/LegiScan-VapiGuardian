@@ -46,7 +46,7 @@ class Feedback(BaseModel):
 
 class ReportStateInput(TypedDict):
     topic: str  # Report topic
-    additional_context: Optional[dict] = None
+    # additional_context: dict
 
 
 class PoliticianReport(BaseModel):
@@ -66,7 +66,7 @@ class ReportStateOutput(TypedDict):
 
 class ReportState(TypedDict):
     topic: Annotated[str, lambda x, y: x]  # Report topic   TODO:
-    additional_context: Optional[dict] = None
+    # additional_context: Annotated[dict, lambda x, y: x]
     feedback_on_report_plan: str  # Feedback on the report plan
     sections: list[Section]  # List of report sections
     completed_sections: Annotated[list, operator.add]  # Send() API key
@@ -78,6 +78,7 @@ class ReportState(TypedDict):
 
 class SectionState(TypedDict):
     topic: Annotated[str, lambda x, y: x]  # Report topic
+    # additional_context: Annotated[dict, lambda x, y: x]
     # section: Section # Report section
     section: Annotated[Section, lambda x, y: x]
     search_iterations: Annotated[
@@ -105,9 +106,10 @@ class SectionOutputState(TypedDict):
 
 # Legislation
 
-
-
 class LegislationAnalysis(BaseModel):
+    name_of_legislation: str = Field(
+        description="Name of the legislation being analyzed.",
+    )
     summary: str = Field(
         description="Summary of the legislation's content and implications.",
     )
@@ -207,6 +209,7 @@ class LegislationStateInput(TypedDict):
 class PoliticianResearchState(TypedDict):
     politician_name: str  # Name of the politician to research
     legislation_text: str  # Original legislation text for context
+    issue_of_concern: str
     search_queries: list[SearchQuery]  # Search queries for research
     source_str: str  # String of formatted source content from web search
     politician: Politician  # Politician data structure to be populated
