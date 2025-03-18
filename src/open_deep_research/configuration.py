@@ -37,7 +37,7 @@ DEFAULT_VAPI_CALL_ANALYSIS_PLAN = {
                         "opposed",
                         "strongly_opposed",
                     ],
-                    "description": "The politician's level of support for the animal welfare position",
+                    "description": "The politician's level of support for the specific request made in the call",
                 },
                 "key_concerns": {
                     "type": "array",
@@ -105,7 +105,7 @@ class Configuration:
     number_of_politicians: int = 3  # Number of politicians to research
 
     # Vapi configuration
-    vapi_phone_id: str = None  # Must be set
+    vapi_phone_id: str = os.getenv("VAPI_PHONE_ID", "")
     vapi_to_number: Optional[str] = (
         None  # Optional preset to number (if unset will use env var TEST_NUMBER)
     )
