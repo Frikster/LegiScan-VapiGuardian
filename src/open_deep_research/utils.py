@@ -1339,11 +1339,11 @@ def upload_report_to_trieve(file_path, report_topic):
     payload = {
         "base64_file": base64_file,
         "file_name": file_name,
-        "create_chunks": True,
+        # "create_chunks": True,
         "description": report_topic,
-        "target_splits_per_chunk": 10,  # Balanced size for political research reports
-        "rebalance_chunks": True,       # Ensure even chunk distribution
-        "split_delimiters": [".", "!", "?", "\n\n"],  # Split on sentences and paragraphs
+        # "target_splits_per_chunk": 10,  # Balanced size for political research reports
+        # "rebalance_chunks": True,       # Ensure even chunk distribution
+        # "split_delimiters": [".", "!", "?", "\n\n"],  # Split on sentences and paragraphs
         "metadata": {
             "report_topic": report_topic,
             "created_at": datetime.now().isoformat(),

@@ -25,7 +25,8 @@ from open_deep_research.prompts import (
     vapi_system_prompt_template,
     politician_query_writer_instructions,
     politician_research_instructions,
-    tldr_prompt_with_phone_context
+    tldr_prompt_with_phone_context,
+    report_topic
 )
 from open_deep_research.state import (
     Feedback,
@@ -106,7 +107,7 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     # Format system instructions
     system_instructions_query = report_planner_query_writer_instructions.format(
         topic=topic,
-        additional_context=str(additional_context),
+        additional_context=additional_context,
         report_organization=report_structure,
         number_of_queries=number_of_queries,
     )
@@ -156,7 +157,7 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     # Format system instructions
     system_instructions_sections = report_planner_instructions.format(
         topic=topic,
-        # additional_context=additional_context,
+        additional_context=additional_context,
         report_organization=report_structure,
         context=source_str,
         feedback=feedback,
@@ -529,10 +530,13 @@ def initiate_final_section_writing(state: ReportState):
 def compile_final_report(state: ReportState, config: RunnableConfig):
     """Compile the final report and create a PoliticianReport object."""
     # Get sections
+    print(f"state in compile_final_report: {state}")
     sections = state["sections"]
     completed_sections = {s.name: s.content for s in state["completed_sections"]}
     topic = state["topic"]
-    politician = state["additional_context"]["politician"]
+    additional_context = state["additional_context"]
+    politician_name = additional_context["politician"].name
+    name_of_legislation = additional_context["analysis"].name_of_legislation
 
     # Update sections with completed content while maintaining original order
     for section in sections:
@@ -542,8 +546,9 @@ def compile_final_report(state: ReportState, config: RunnableConfig):
     all_sections = "\n\n".join([s.content for s in sections])
 
     # Replace spaces with underscores and remove special characters for filename
-    safe_filename = topic.replace(" ", "_").replace(",", "").replace(".", "")
-    filename = f"data/{safe_filename}_report.txt"
+    unsafe_filename = f"Report_on_{politician_name}_and_{name_of_legislation}"
+    safe_filename = unsafe_filename.replace(" ", "_").replace(",", "").replace(".", "")
+    filename = f"data/{safe_filename}.txt"
 
     # Ensure data directory exists
     if not os.path.exists("data"):
@@ -556,7 +561,7 @@ def compile_final_report(state: ReportState, config: RunnableConfig):
     print(f"Report written to {filename}")
 
     # Upload the file to Trieve
-    upload_report_to_trieve(filename, topic)
+    # upload_report_to_trieve(filename, topic)
 
     # Generate TLDR points
     configurable = Configuration.from_runnable_config(config)
@@ -577,10 +582,11 @@ def compile_final_report(state: ReportState, config: RunnableConfig):
 
     # Create a PoliticianReport object
     politician_report = PoliticianReport(
-        politician_name=politician.name,
+        politician_name=politician_name,
         topic=state["topic"],
         final_report=all_sections,
         tldr_points=bullet_points,
+        filename=filename
     )
 
     return {
@@ -760,7 +766,6 @@ def initiate_politician_reports(
 ) -> Command[Literal["generate_report"]]:
     """Identify politicians to research and process them sequentially."""
     analysis = state["analysis"]
-    legislation_text = state["legislation_text"]
     politicians = state["politicians"]
     
     print("initiate_politician_reports state: ", state)
@@ -771,6 +776,15 @@ def initiate_politician_reports(
 
     # Limit to the specified number of politicians
     politicians_to_research = politicians[:max_politicians]
+    
+    # Format the topic for each politician using the report_topic template
+    formatted_politician_topics = []
+    for politician in politicians_to_research:
+        formatted_topic = report_topic.format(
+            legislation_name=analysis.name_of_legislation,
+            name=politician.name
+        )
+        formatted_politician_topics.append((politician, formatted_topic))
 
     # Spawn a report generation task for each politician
     return Command(
@@ -778,16 +792,15 @@ def initiate_politician_reports(
             Send(
                 "generate_report",
                 {
-                    "topic": f"Arguments against the legislation known as {analysis.name_of_legislation}. Arguments should be in line with the politics of {politician.name}",
+                    "topic": formatted_politician_topic[1],  # Use the formatted topic from the template
                     #  TODO: add adiditional context? Seems to degrade peroformance
                     "additional_context": {
-                        "politician": politician,
-                        "legislation_text": legislation_text,
+                        "politician": formatted_politician_topic[0],
                         "analysis": analysis,
                     },
                 },
             )
-            for politician in politicians_to_research
+            for formatted_politician_topic in formatted_politician_topics
         ]
     )
 
@@ -918,8 +931,12 @@ def create_vapi_tools(
 ) -> Dict[str, Any]:
     """Create Vapi tools for the assistant."""
     legislation_path = state["legislation_path"]
+    final_reports = state["final_reports"]
+    
     file_id = upload_file_to_vapi(legislation_path)
     tool_id = create_query_tool(file_id)
+    for report in final_reports:
+        upload_report_to_trieve(report.filename, report.topic)
     return {"vapi_tools": VapiTools(file_id=file_id, tool_id=tool_id)}
 
 

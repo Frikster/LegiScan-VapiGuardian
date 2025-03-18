@@ -1,3 +1,7 @@
+report_topic = """
+Counter-arguments to the legislation known as {legislation_name} that is tailored to {name}'s political stance/values, financial backing, social media posts etc that is most likely to convince {name} to withdraw their support for the legislation. Look for arguments in line with {name}'s political stances and background that they might not have considered.
+"""
+
 # Prompt to generate search queries to help with planning the report
 report_planner_query_writer_instructions = """You are performing research for a report. 
 
@@ -32,6 +36,10 @@ report_planner_instructions = """I want a plan for a report that is concise and 
 The topic of the report is:
 {topic}
 </Report topic>
+
+<Additional Context>
+{additional_context}
+</Additional Context>
 
 <Report organization>
 The report should follow this organization: 

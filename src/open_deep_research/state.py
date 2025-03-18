@@ -58,6 +58,7 @@ class PoliticianReport(BaseModel):
     tldr_points: List[str] = Field(
         description="TLDR bullet points", default_factory=list
     )
+    filename: str = Field(description="Location where file with report has been stored")
 
 
 class ReportStateOutput(TypedDict):
