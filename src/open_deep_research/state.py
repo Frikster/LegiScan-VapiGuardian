@@ -45,8 +45,8 @@ class Feedback(BaseModel):
 
 
 class ReportStateInput(TypedDict):
-    topic: Annotated[str, lambda x, y: x]  # Report topic
-    additional_context: Annotated[dict, lambda x, y: x]
+    topic: Annotated[str, lambda x, y: x or y]  # Report topic
+    additional_context: Annotated[dict, lambda x, y: x or y]
 
 
 class PoliticianReport(BaseModel):
@@ -65,33 +65,33 @@ class ReportStateOutput(TypedDict):
 
 
 class ReportState(TypedDict):
-    topic: Annotated[str, lambda x, y: x]  # Report topic   TODO:
-    additional_context: Annotated[dict, lambda x, y: x]
+    topic: Annotated[str, lambda x, y: x or y]  # Report topic   TODO:
+    additional_context: Annotated[dict, lambda x, y: x or y]
     feedback_on_report_plan: str  # Feedback on the report plan
     sections: list[Section]  # List of report sections
     completed_sections: Annotated[list, operator.add]  # Send() API key
     report_sections_from_research: Annotated[
-        str, lambda x, y: x
+        str, lambda x, y: x or y
     ]  # String of any completed sections from research to write final sections
     final_reports: list[PoliticianReport]
 
 
 class SectionState(TypedDict):
-    topic: Annotated[str, lambda x, y: x]  # Report topic
+    topic: Annotated[str, lambda x, y: x or y]  # Report topic
     # additional_context: Annotated[dict, lambda x, y: x]
     # section: Section # Report section
-    section: Annotated[Section, lambda x, y: x]
+    section: Annotated[Section, lambda x, y: x or y]
     search_iterations: Annotated[
-        int, lambda x, y: x
+        int, lambda x, y: x or y
     ]  # Number of search iterations done
     search_queries: Annotated[
-        list[SearchQuery], lambda x, y: x
+        list[SearchQuery], lambda x, y: x or y
     ]  # List of search queries
     source_str: Annotated[
-        str, lambda x, y: x
+        str, lambda x, y: x or y
     ]  # String of formatted source content from web search
     report_sections_from_research: Annotated[
-        str, lambda x, y: x
+        str, lambda x, y: x or y
     ]  # String of any completed sections from research to write final sections
     completed_sections: list[
         Section
