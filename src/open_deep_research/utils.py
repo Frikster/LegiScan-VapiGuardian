@@ -993,7 +993,7 @@ def create_query_tool(file_id: str, name: str = "legislation-query-tool") -> str
 @traceable
 def create_vapi_assistant(name: str, system_prompt: str, first_message: str = None, 
                          end_call_message: str = None, analysis_plan: dict = None,
-                         tool_id: str = None) -> str:
+                         tool_ids: List[str] = None) -> str:
     """Create a new Vapi assistant, deleting any existing assistant with the same name.
     
     Args:
@@ -1002,7 +1002,7 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
         first_message: First message the assistant will say when the call connects
         end_call_message: Message the assistant will say before ending the call
         analysis_plan: Configuration for call analysis and outcome reporting
-        tool_id: ID of the query tool to attach to the assistant
+        tool_ids: IDs of the tools to attach to the assistant
         
     Returns:
         str: Assistant ID
@@ -1116,11 +1116,11 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
     }
     
     # Add tool ID if provided
-    if tool_id:
+    if tool_ids:
         if "model" not in payload:
             payload["model"] = {}
         
-        payload["model"]["toolIds"] = [tool_id]
+        payload["model"]["toolIds"] = tool_ids
         payload["model"]["tools"] = [
             {
                 "type": "endCall"

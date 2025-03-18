@@ -163,8 +163,8 @@ class LegislationStateOutput(TypedDict):
 class VapiTools(BaseModel):
     """Tools created in Vapi for the assistant."""
 
-    file_id: str = Field(description="ID of the uploaded legislation file")
-    tool_id: str = Field(description="ID of the created query tool")
+    legislation_file_id: str = Field(description="ID of the uploaded legislation file")
+    tool_ids: List[str] = Field(description="IDs of the created query tools")
 
 class Politician(BaseModel):
     name: str = Field(

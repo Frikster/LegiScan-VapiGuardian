@@ -933,11 +933,12 @@ def create_vapi_tools(
     legislation_path = state["legislation_path"]
     final_reports = state["final_reports"]
     
-    file_id = upload_file_to_vapi(legislation_path)
-    tool_id = create_query_tool(file_id)
+    legislation_file_id = upload_file_to_vapi(legislation_path)
+    query_legislation_tool_id = create_query_tool(legislation_file_id)
+    process_email_tool_id = os.getenv("VAPI_PROCESS_EMAIL_INFO_TOOL_ID") or "cd38c02a-70e1-4e62-bfe1-cc51dc7899cf"
     for report in final_reports:
         upload_report_to_trieve(report.filename, report.topic)
-    return {"vapi_tools": VapiTools(file_id=file_id, tool_id=tool_id)}
+    return {"vapi_tools": VapiTools(legislation_file_id=legislation_file_id, tool_ids=[query_legislation_tool_id, process_email_tool_id])}
 
 
 def prepare_vapi_configs(
@@ -1006,7 +1007,7 @@ def create_vapi_assistants(
 ) -> Dict[str, Any]:
     """Create Vapi assistants for each configuration."""
     vapi_configs = state["vapi_configs"]
-    tool_id = state["vapi_tools"].tool_id
+    tool_ids = state["vapi_tools"].tool_ids
 
     updated_configs = []
     for config in vapi_configs:
@@ -1016,7 +1017,7 @@ def create_vapi_assistants(
             system_prompt=config.system_prompt,
             first_message=config.first_message,
             analysis_plan=config.analysis_plan,
-            tool_id=tool_id,
+            tool_ids=tool_ids,
         )
 
         # Create updated config with assistant_id
@@ -1199,13 +1200,20 @@ def make_calls(state: LegislationState, config: RunnableConfig):
     # Make calls
     call_results = []
     for call_config in approved_calls:
-        result = make_vapi_call(
-            assistant_id=call_config.assistant_id,
-            phone_number_id=configurable.vapi_phone_id,
-            customer_number=configurable.vapi_to_number
-            or os.getenv("TEST_NUMBER"),  # call_config.customer_number,
-        )
-        call_results.append(result)
+        from_number = configurable.vapi_phone_id or os.getenv("VAPI_PHONE_ID")
+        if not from_number:
+            raise ValueError("No phone number ID provided. Please set vapi_phone_id in configuration or VAPI_PHONE_ID environment variable.")
+            
+        to_number = configurable.vapi_to_number or os.getenv("TEST_NUMBER")
+        if not to_number:
+            raise ValueError("No destination phone number provided. Please set vapi_to_number in configuration or TEST_NUMBER environment variable.")
+        if call_config.assistant_id:
+            result = make_vapi_call(
+                assistant_id=call_config.assistant_id,
+                phone_number_id=from_number,
+                customer_number=to_number,  # call_config.customer_number,
+            )
+            call_results.append(result)
 
     return {"call_results": call_results}
 
