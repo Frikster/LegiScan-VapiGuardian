@@ -24,7 +24,8 @@ from open_deep_research.prompts import (
     tldr_prompt,
     vapi_system_prompt_template,
     politician_query_writer_instructions,
-    politician_research_instructions
+    politician_research_instructions,
+    tldr_prompt_with_phone_context
 )
 from open_deep_research.state import (
     Feedback,
@@ -64,6 +65,7 @@ from open_deep_research.utils import (
     setup_persistent_vectorstore,
     tavily_search_async,
     upload_file_to_vapi,
+    upload_report_to_trieve
 )
 
 
@@ -72,6 +74,7 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     """Generate the report plan."""
     # Inputs
     print("generate_report_plan state", state)
+    print("Type of topic:", type(state["topic"]))
     topic = state["topic"]
     additional_context = state["additional_context"]
     feedback = state.get("feedback_on_report_plan", None)
@@ -153,6 +156,7 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     # Format system instructions
     system_instructions_sections = report_planner_instructions.format(
         topic=topic,
+        # additional_context=additional_context,
         report_organization=report_structure,
         context=source_str,
         feedback=feedback,
@@ -212,6 +216,7 @@ def human_feedback(
     """Get feedback on the report plan."""
     # Get sections
     topic = state["topic"]
+    # additional_context = state["additional_context"]
     sections = state["sections"]
     sections_str = "\n\n".join(
         f"Section: {section.name}\n"
@@ -222,6 +227,7 @@ def human_feedback(
 
     # Get feedback on the report plan from interrupt
     interrupt_message = f"""Please provide feedback on the following report plan. 
+                        \n\nTopic: {topic}\n\n
                         \n\n{sections_str}\n\n
                         \nDoes the report plan meet your needs? Pass "Yes" to approve the report plan or provide feedback to regenerate the report plan:"""
 
@@ -234,7 +240,9 @@ def human_feedback(
             goto=[
                 Send(
                     "build_section_with_web_research",
-                    {"topic": topic, "section": s, "search_iterations": 0},
+                    {"topic": topic,
+                    #  "additional_context": additional_context,
+                     "section": s, "search_iterations": 0},
                 )
                 for s in sections
                 if s.research
@@ -255,6 +263,7 @@ def generate_queries(state: SectionState, config: RunnableConfig):
     """Generate search queries for a report section."""
     # Get state
     topic = state["topic"]
+    # additional_context = state["additional_context"]
     section = state["section"]
 
     # Get configuration
@@ -272,6 +281,7 @@ def generate_queries(state: SectionState, config: RunnableConfig):
     # Format system instructions
     system_instructions = query_writer_instructions.format(
         topic=topic,
+        # additional_context=additional_context,
         section_topic=section.description,
         number_of_queries=number_of_queries,
     )
@@ -346,6 +356,7 @@ def write_section(
     """Write a section of the report."""
     # Get state
     topic = state["topic"]
+    # additional_context = state["additional_context"]
     section = state["section"]
     source_str = state["source_str"]
 
@@ -355,6 +366,7 @@ def write_section(
     # Format system instructions
     system_instructions = section_writer_instructions.format(
         topic=topic,
+        # additional_context=additional_context,
         section_name=section.name,
         section_topic=section.description,
         context=source_str,
@@ -386,6 +398,7 @@ def write_section(
 
     section_grader_instructions_formatted = section_grader_instructions.format(
         topic=topic,
+        # additional_context=additional_context,
         section_topic=section.description,
         section=section.content,
         number_of_follow_up_queries=configurable.number_of_queries,
@@ -450,12 +463,14 @@ def write_final_sections(state: SectionState, config: RunnableConfig):
 
     # Get state
     topic = state["topic"]
+    # additional_context = state["additional_context"]
     section = state["section"]
     completed_report_sections = state["report_sections_from_research"]
 
     # Format system instructions
     system_instructions = final_section_writer_instructions.format(
         topic=topic,
+        # additional_context=additional_context,
         section_name=section.name,
         section_topic=section.description,
         context=completed_report_sections,
@@ -516,6 +531,8 @@ def compile_final_report(state: ReportState, config: RunnableConfig):
     # Get sections
     sections = state["sections"]
     completed_sections = {s.name: s.content for s in state["completed_sections"]}
+    topic = state["topic"]
+    politician = state["additional_context"]["politician"]
 
     # Update sections with completed content while maintaining original order
     for section in sections:
@@ -524,19 +541,22 @@ def compile_final_report(state: ReportState, config: RunnableConfig):
     # Compile final report
     all_sections = "\n\n".join([s.content for s in sections])
 
-    # Write the report to a text file with the name of the politician
-    politician = state["additional_context"]["politician"]
-    politician_name = politician.name
-
     # Replace spaces with underscores and remove special characters for filename
-    safe_filename = politician_name.replace(" ", "_").replace(",", "").replace(".", "")
+    safe_filename = topic.replace(" ", "_").replace(",", "").replace(".", "")
     filename = f"data/{safe_filename}_report.txt"
+
+    # Ensure data directory exists
+    if not os.path.exists("data"):
+        os.makedirs("data")
 
     # Write the report to a file
     with open(filename, "w") as f:
         f.write(all_sections)
 
     print(f"Report written to {filename}")
+
+    # Upload the file to Trieve
+    upload_report_to_trieve(filename, topic)
 
     # Generate TLDR points
     configurable = Configuration.from_runnable_config(config)
@@ -545,7 +565,7 @@ def compile_final_report(state: ReportState, config: RunnableConfig):
         model_provider=get_config_value(configurable.planner_provider),
     )
     response = llm.invoke(
-        [SystemMessage(content=tldr_prompt.format(final_report=all_sections))]
+        [SystemMessage(content=tldr_prompt_with_phone_context.format(input=all_sections))]
     )
 
     # Extract bullet points from response
@@ -557,7 +577,7 @@ def compile_final_report(state: ReportState, config: RunnableConfig):
 
     # Create a PoliticianReport object
     politician_report = PoliticianReport(
-        politician_name=politician_name,
+        politician_name=politician.name,
         topic=state["topic"],
         final_report=all_sections,
         tldr_points=bullet_points,
@@ -573,7 +593,7 @@ def compile_final_report(state: ReportState, config: RunnableConfig):
 
 
 def analyze_legislation(state: LegislationState, config: RunnableConfig):
-    """Analyze the legislation for animal welfare implications."""
+    """Analyze the legislation for issue implications."""
     legislation_path = state["legislation_path"]
     issue_of_concern = state["issue_of_concern"]
 
@@ -620,6 +640,7 @@ def identify_politicians_to_research(state: LegislationState, config: RunnableCo
     """Identify politicians to research and kick off parallel research."""
     # Get analysis
     analysis = state["analysis"]
+    issue_of_concern = state["issue_of_concern"]
     legislation_text = state["legislation_text"]
      
     # Get configuration
@@ -633,7 +654,8 @@ def identify_politicians_to_research(state: LegislationState, config: RunnableCo
     return Command(goto=[
         Send("research_politician", {
              "politician_name": name,
-             "legislation_text": legislation_text
+             "legislation_text": legislation_text,
+             "issue_of_concern": issue_of_concern
         }) for name in politicians_to_research_names
     ])
  
@@ -642,6 +664,7 @@ def generate_politician_queries(state: PoliticianResearchState, config: Runnable
     # Get state
     politician_name = state["politician_name"]
     legislation_text = state["legislation_text"]
+    issue_of_concern = state["issue_of_concern"]
 
     # Get configuration
     configurable = Configuration.from_runnable_config(config)
@@ -657,7 +680,8 @@ def generate_politician_queries(state: PoliticianResearchState, config: Runnable
     system_instructions = politician_query_writer_instructions.format(
         politician_name=politician_name,
         legislation_context=legislation_text,
-        number_of_queries=number_of_queries
+        number_of_queries=number_of_queries,
+        issue_of_concern=issue_of_concern
     )
 
     # TODO: Improve to get multiple variants of arguments based on different conversation paths
@@ -704,6 +728,7 @@ def research_politician(state: PoliticianResearchState, config: RunnableConfig):
     politician_name = state["politician_name"]
     legislation_text = state["legislation_text"]
     source_str = state["source_str"]
+    issue_of_concern = state["issue_of_concern"]
 
     # Get configuration
     configurable = Configuration.from_runnable_config(config)
@@ -718,7 +743,8 @@ def research_politician(state: PoliticianResearchState, config: RunnableConfig):
     system_instructions = politician_research_instructions.format(
         politician_name=politician_name,
         legislation_context=legislation_text,
-        context=source_str
+        context=source_str,
+        issue_of_concern=issue_of_concern
     )
 
     politician = structured_llm.invoke([
@@ -736,6 +762,8 @@ def initiate_politician_reports(
     analysis = state["analysis"]
     legislation_text = state["legislation_text"]
     politicians = state["politicians"]
+    
+    print("initiate_politician_reports state: ", state)
 
     # Get configuration
     configurable = Configuration.from_runnable_config(config)
@@ -750,7 +778,8 @@ def initiate_politician_reports(
             Send(
                 "generate_report",
                 {
-                    "topic": f"A report on counter-arguments to the legislation that is likely to resonate with {politician.name}",
+                    "topic": f"Arguments against the legislation known as {analysis.name_of_legislation}. Arguments should be in line with the politics of {politician.name}",
+                    #  TODO: add adiditional context? Seems to degrade peroformance
                     "additional_context": {
                         "politician": politician,
                         "legislation_text": legislation_text,
@@ -836,7 +865,7 @@ def generate_tldr_points(state: ReportState, config: RunnableConfig):
         model_provider=get_config_value(configurable.planner_model),
     )
     response = llm.invoke(
-        [SystemMessage(content=tldr_prompt.format(final_report=final_report))]
+        [SystemMessage(content=tldr_prompt_with_phone_context.format(input=final_report))]
     )
 
     # Extract bullet points from response
@@ -902,6 +931,8 @@ def prepare_vapi_configs(
     configurable = Configuration.from_runnable_config(config)
     politicians = state["politicians"]
     final_reports = state["final_reports"]
+    analysis = state["analysis"]
+    legislation_name = analysis.name_of_legislation
 
     # Create a lookup dictionary for politician reports
     report_by_politician = {report.politician_name: report for report in final_reports}
@@ -916,13 +947,23 @@ def prepare_vapi_configs(
             key_points_formatted = "\n".join(
                 [f"- {point}" for point in report.tldr_points]
             )
+            
+            # Generate TLDR for politician profile
+            configurable = Configuration.from_runnable_config(config)
+            llm = init_chat_model(
+                model=get_config_value(configurable.planner_model),
+                model_provider=get_config_value(configurable.planner_provider),
+            )
+            politician_tldr_response = llm.invoke(
+                [SystemMessage(content=tldr_prompt.format(input=politician.model_dump_json()))]
+            )
 
             # Create system prompt with all context
             system_prompt = vapi_system_prompt_template.format(
                 assistant_name=configurable.vapi_assistant_name,
                 organization_name=configurable.vapi_organization_name,
-                ask="Please reconsider your support for this legislation",  # TODO: Make this configurable
-                politician_profile=politician.model_dump_json(),
+                ask=f"You want to urge the politician to reconsider their support for {legislation_name}",  # TODO: Make this configurable
+                politician_profile=politician_tldr_response.content,
                 tldr_points=key_points_formatted,
             )
 
@@ -1252,7 +1293,6 @@ legislation_analysis.add_edge("generate_report", "create_vapi_tools")
 legislation_analysis.add_edge("create_vapi_tools", "prepare_vapi_configs")
 legislation_analysis.add_edge("prepare_vapi_configs", "create_vapi_assistants")
 legislation_analysis.add_edge("create_vapi_assistants", "call_scripts_human_feedback")
-legislation_analysis.add_edge("call_scripts_human_feedback", "make_calls")
 legislation_analysis.add_edge("make_calls", END)
 
 legislation_graph = legislation_analysis.compile()

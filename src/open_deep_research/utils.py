@@ -1033,6 +1033,7 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
             ],
             "emotionRecognitionEnabled": True,
             "maxTokens": 100,
+            "knowledgeBaseId": os.getenv("VAPI_KNOWLEDGE_BASE_ID")
         },
         "voice": {
             "provider": "playht",
@@ -1047,6 +1048,10 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
         "messagePlan": {
             "idleMessages": ["Hello?", "Are you still there?", "Can you hear me?"]
         },
+        # TODO: add?
+        # "startSpeakingPlan": {
+        #     "smartEndpointingEnabled": True,
+        # },
     }
     
     # Add optional parameters if provided
@@ -1127,8 +1132,6 @@ def create_vapi_assistant(name: str, system_prompt: str, first_message: str = No
                 "type": "transferCall"
             }
         ]
-        # Add knowledge base ID directly under model config
-        # payload["model"]["knowledgeBaseId"] = <from env var>
     
     # Pretty print the payload for easier debugging
     import json
@@ -1289,3 +1292,74 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     print(f"Extracted {len(text)} characters from {pdf_path}")
     
     return text
+
+@traceable
+def upload_report_to_trieve(file_path, report_topic):
+    """Upload a report file to Trieve for vectorization and retrieval.
+    
+    Args:
+        file_path: Path to the report file
+        report_topic: Topic of the report
+    """
+    import os
+    import base64
+    import requests
+    from datetime import datetime
+
+    # Check if Trieve API key and dataset ID are available
+    api_key = os.getenv("TRIEVE_API_KEY")
+    dataset_id = os.getenv("TRIEVE_DATASET_ID")
+    
+    if not api_key or not dataset_id:
+        print("Trieve API key or dataset ID not found. Skipping upload to Trieve.")
+        return
+
+    # Read the file
+    with open(file_path, "rb") as file:
+        file_content = file.read()
+    
+    # Encode file to base64
+    base64_file = base64.b64encode(file_content).decode("utf-8")
+    
+    # Get filename from path
+    file_name = os.path.basename(file_path)
+    
+    # Configure Trieve API request
+    url = "https://api.trieve.ai/api/file"
+    headers = {
+        "Authorization": api_key,
+        "Content-Type": "application/json",
+        "TR-Dataset": dataset_id,
+    }
+    
+    # Prepare request body - using settings optimized for our use case:
+    # - Small target splits per chunk (8-12) for more precise retrieval
+    # - Rebalance chunks to ensure even distribution of content
+    # - Include relevant metadata for filtering
+    payload = {
+        "base64_file": base64_file,
+        "file_name": file_name,
+        "create_chunks": True,
+        "description": report_topic,
+        "target_splits_per_chunk": 10,  # Balanced size for political research reports
+        "rebalance_chunks": True,       # Ensure even chunk distribution
+        "split_delimiters": [".", "!", "?", "\n\n"],  # Split on sentences and paragraphs
+        "metadata": {
+            "report_topic": report_topic,
+            "created_at": datetime.now().isoformat(),
+            "content_type": "political_research"
+        },
+        "time_stamp": datetime.now().isoformat()
+    }
+    
+    # Make the API request
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        print(f"Successfully uploaded {file_name} to Trieve: {response.json()}")
+        return response.json()
+    except Exception as e:
+        print(f"Error uploading to Trieve: {e}")
+        if hasattr(e, 'response') and e.response:
+            print(f"Response content: {e.response.content}")
+        return None

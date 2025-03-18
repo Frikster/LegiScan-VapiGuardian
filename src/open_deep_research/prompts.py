@@ -5,6 +5,10 @@ report_planner_query_writer_instructions = """You are performing research for a 
 {topic}
 </Report topic>
 
+<Additional Context>
+{additional_context}
+</Additional Context>
+
 <Report organization>
 {report_organization}
 </Report organization>
@@ -335,7 +339,7 @@ Can also use this tool to track lobbyists tied to bills: https://www.opensecrets
 # </Task>
 # """
 
-tldr_prompt = """Please summarize the provided text. Use a method of Extreme TLDR generation, 
+tldr_prompt_with_phone_context = """Please summarize the provided text. Use a method of Extreme TLDR generation, 
     a new form of extreme summarization for paragraphs. TLDR generation involves high source 
     compression, removes stop words and summarizes the paragraph whilst retaining meaning.
     
@@ -343,7 +347,15 @@ tldr_prompt = """Please summarize the provided text. Use a method of Extreme TLD
     that can easily be referenced in a brief phone call.
     
     Text to summarize:
-    {final_report}
+    {input}
+    """
+
+tldr_prompt = """Please summarize the provided text. Use a method of Extreme TLDR generation, 
+    a new form of extreme summarization for paragraphs. TLDR generation involves high source 
+    compression, removes stop words and summarizes the paragraph whilst retaining meaning.
+    
+    Text to summarize:
+    {input}
     """
 
 vapi_system_prompt_template = """<Your Identity>

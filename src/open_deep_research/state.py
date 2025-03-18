@@ -45,8 +45,8 @@ class Feedback(BaseModel):
 
 
 class ReportStateInput(TypedDict):
-    topic: str  # Report topic
-    # additional_context: dict
+    topic: Annotated[str, lambda x, y: x]  # Report topic
+    additional_context: Annotated[dict, lambda x, y: x]
 
 
 class PoliticianReport(BaseModel):
@@ -66,7 +66,7 @@ class ReportStateOutput(TypedDict):
 
 class ReportState(TypedDict):
     topic: Annotated[str, lambda x, y: x]  # Report topic   TODO:
-    # additional_context: Annotated[dict, lambda x, y: x]
+    additional_context: Annotated[dict, lambda x, y: x]
     feedback_on_report_plan: str  # Feedback on the report plan
     sections: list[Section]  # List of report sections
     completed_sections: Annotated[list, operator.add]  # Send() API key

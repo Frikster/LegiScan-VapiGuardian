@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -98,7 +98,7 @@ class Configuration:
         WriterProvider.OPENAI
     )  # Defaults to Anthropic as provider
     writer_model: str = "gpt-4o-mini"  # Defaults to claude-3-5-sonnet-latest
-    search_api: SearchAPI = SearchAPI.PERPLEXITY  # Default to TAVILY
+    search_api: SearchAPI = SearchAPI.TAVILY  # Default to TAVILY
     search_api_config: Optional[Dict[str, Any]] = None
 
     # New fields for legislation analysis
