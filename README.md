@@ -1,9 +1,12 @@
-Developed for a stealth-mode startup. This application is an advanced multi-agent RAG system that analyzes legislation, researches sponsoring politicians' backgrounds, and generates personalized AI voice assistants. It is implemented using a Trieve vectorstore for efficient knowledge retrieval, enabling contextualized call scripts calibrated for political advocacy conversations tailored to each politician's specific positions and voting history. The call agents themselves are calibrated to be agile during conversation.
-
-If you have information on what tech I can use to make the call agents more robustly adhere to guardrails please do reach out! This is a technical question I have yet to solve and am very eager to learn about. We reached an acceptable milestone with this MVP improving on what was currently being used by the Stealth Startup, nonetheless this MVP is not yet production-ready. I am taking a step back from developing this further as the company is potentially pivoting.
-
+**Note:** This code is shared with explicit permission from the stealth-mode startup for which it was developed. While the company may be pivoting, they have authorized me to showcase this work as part of my portfolio.
 
 [Video demonstration](https://youtu.be/wNLGqJwOW9A?si=jb5RM8aOvsNTelhA)
+
+This application is an advanced multi-agent RAG system that analyzes legislation, researches sponsoring politicians' backgrounds, and generates personalized AI voice assistants. It is implemented using a Trieve vectorstore for efficient knowledge retrieval, enabling contextualized call scripts calibrated for political advocacy conversations tailored to each politician's specific positions and voting history. The call agents themselves are calibrated to be agile during conversation.
+
+If you have information on what tech I can use to make the call agents more robustly adhere to guardrails please do reach out! This is a technical question I have yet to solve and am very eager to learn about. We reached an acceptable milestone with this MVP improving on what was currently being used by the Stealth Startup, nonetheless this MVP is not yet production-ready. 
+
+I am - unfortunately - taking a step back from developing this further as the company's requirements with regards to this project are presently uncertain.
 
 # Running Locally
 
